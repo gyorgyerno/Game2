@@ -113,7 +113,7 @@ export default function SoloPage() {
                     key={level.level}
                     onClick={() => unlocked && setSelectedLevel(idx)}
                     disabled={!unlocked}
-                    className={`relative rounded-2xl p-6 text-left transition-all border-2 ${
+                    className={`relative rounded-2xl p-6 py-8 text-left transition-all border-2 min-h-[220px] ${
                       unlocked
                         ? 'border-transparent hover:scale-105 hover:border-purple-500 cursor-pointer'
                         : 'border-gray-800 opacity-50 cursor-not-allowed'
@@ -208,7 +208,7 @@ export default function SoloPage() {
                       unlocked && router.push(`/solo/play?id=${puzzle.id}`)
                     }
                     disabled={!unlocked}
-                    className={`rounded-2xl p-6 text-left transition-all border-2 ${
+                    className={`rounded-2xl p-6 py-8 text-left transition-all border-2 min-h-[220px] ${
                       unlocked
                         ? 'bg-gray-900 border-gray-800 hover:border-purple-500 hover:scale-105 cursor-pointer'
                         : 'bg-gray-900 border-gray-800 opacity-40 cursor-not-allowed'

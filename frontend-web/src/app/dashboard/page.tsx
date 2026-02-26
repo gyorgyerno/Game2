@@ -207,11 +207,16 @@ export default function DashboardPage() {
                 </p>
               )}
             </div>
-            <button onClick={handlePlay} disabled={loading || aiLoading} className="btn-primary gap-2 min-w-[130px]">
-              {loading
-                ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creare meci...</>
-                : <><Play size={16} fill="currentColor" /> Joacă</>}
-            </button>
+            <div className="flex flex-col items-center gap-1">
+              <button onClick={handlePlay} disabled={loading || aiLoading} className="btn-primary gap-2 min-w-[130px]">
+                {loading
+                  ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creare meci...</>
+                  : <><Play size={16} fill="currentColor" /> Joacă</>}
+              </button>
+              <span className="text-xs text-slate-400 font-medium">
+                🎯 Nivel {effectiveLevel} · max {MAX_PLAYERS_PER_LEVEL[effectiveLevel]} jucători
+              </span>
+            </div>
             <button onClick={handlePlayAI} disabled={loading || aiLoading} className="btn-secondary gap-2 min-w-[130px] border-violet-500/50 hover:border-violet-400">
               {aiLoading
                 ? <><span className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /> Se generează...</>
@@ -295,7 +300,7 @@ export default function DashboardPage() {
                 <Link
                   key={lvl}
                   href="/integrame"
-                  className="bg-slate-800 hover:bg-slate-700 rounded-xl p-3 text-center transition-all hover:scale-105 group"
+                  className="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 py-6 text-center transition-all hover:scale-105 group min-h-[110px] flex flex-col items-center justify-center"
                 >
                   <div className="text-xl font-black text-slate-500 group-hover:text-purple-400 transition-colors">
                     {lvl}

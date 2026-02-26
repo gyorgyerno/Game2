@@ -94,7 +94,7 @@ export default function IntegramePage() {
                         <button
                           key={gameIdx}
                           onClick={() => router.push(`/integrame/play?level=${level}&game=${gameIdx}`)}
-                          className="flex flex-col items-center gap-2 p-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all group"
+                          className="flex flex-col items-center gap-2 p-4 py-6 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all group min-h-[120px] justify-center"
                         >
                           <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-bold text-lg group-hover:scale-110 transition-transform`}>
                             {completed ? '✓' : gameIdx + 1}
@@ -112,7 +112,7 @@ export default function IntegramePage() {
                     return (
                       <div
                         key={gameIdx}
-                        className="flex flex-col items-center gap-2 p-4 rounded-xl bg-slate-800/40 border border-slate-800 cursor-not-allowed select-none"
+                        className="flex flex-col items-center gap-2 p-4 py-6 rounded-xl bg-slate-800/40 border border-slate-800 cursor-not-allowed select-none min-h-[120px] justify-center"
                       >
                         <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-500 text-xl">
                           🔒

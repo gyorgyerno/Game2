@@ -25,47 +25,71 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
         where: { id: matchId },
         include: { players: { include: { user: true } } },
       });
+
+      const roomSockets = await io.in(`match:${matchId}`).allSockets();
+      logger.info(`[JOIN_MATCH] user=${userId} matchId=${matchId} DB:status=${match?.status ?? 'NOT_FOUND'} players=${match?.players.length ?? 0} countdownStarted=${countdownStarted.has(matchId)} timerActive=${!!countdownTimers[matchId]} roomBefore=${roomSockets.size}`);
+
       if (!match) return socket.emit(SOCKET_EVENTS.ERROR, { message: 'Match not found' });
 
       const room = `match:${matchId}`;
       socket.join(room);
-      // Inregistreaza socket-ul in tracker pentru detectarea disconnect
       socketMatchMap.set(socket.id, matchId);
 
-      // Emit current match state
-      io.to(room).emit(SOCKET_EVENTS.MATCH_STATE, match);
+      const roomSocketsAfter = await io.in(room).allSockets();
+      logger.info(`[JOIN_MATCH] roomAfterJoin=${roomSocketsAfter.size}`);
 
-      // Dacă meciul nu mai e în waiting, nu face nimic
-      if (match.status !== 'waiting') return;
+      socket.emit(SOCKET_EVENTS.MATCH_STATE, match);
 
-      // Dacă sunt suficienți jucători și countdown-ul nu a pornit deja
-      if (match.players.length >= 2 && !countdownStarted.has(matchId)) {
-        // Marchează imediat — orice alt JOIN_MATCH care vine nu va mai porni al doilea countdown
-        countdownStarted.add(matchId);
-
-        await prisma.match.update({ where: { id: matchId }, data: { status: 'countdown' } });
-
-        let countdown = 5;
-        countdownTimers[matchId] = setInterval(async () => {
-          io.to(room).emit(SOCKET_EVENTS.MATCH_COUNTDOWN, { countdown });
-          countdown--;
-          if (countdown < 0) {
-            clearInterval(countdownTimers[matchId]);
-            delete countdownTimers[matchId];
-            await prisma.match.update({
-              where: { id: matchId },
-              data: { status: 'active', startedAt: new Date() },
-            });
-            io.to(room).emit(SOCKET_EVENTS.MATCH_START, { startedAt: new Date() });
-
-            // Auto-finish after timeLimit
-            const rules = GAME_RULES[match.gameType] || GAME_RULES['integrame'];
-            matchTimers[matchId] = setTimeout(() => {
-              autoFinishMatch(io, matchId, room);
-            }, rules.timeLimit * 1000);
-          }
-        }, 1000);
+      if (match.status === 'active') {
+        logger.info(`[JOIN_MATCH] ACTIV → trimit MATCH_START direct user=${userId}`);
+        socket.emit(SOCKET_EVENTS.MATCH_START, { startedAt: match.startedAt });
+        return;
       }
+
+      if (match.status === 'countdown') {
+        logger.info(`[JOIN_MATCH] COUNTDOWN → trimit MATCH_COUNTDOWN(3) user=${userId}`);
+        socket.emit(SOCKET_EVENTS.MATCH_COUNTDOWN, { countdown: 3 });
+        return;
+      }
+
+      if (match.status !== 'waiting') {
+        logger.info(`[JOIN_MATCH] status=${match.status}, ignor user=${userId}`);
+        return;
+      }
+
+      // Status = waiting
+      if (match.players.length < 2) {
+        logger.info(`[JOIN_MATCH] Astept jucatori (${match.players.length}/2) matchId=${matchId}`);
+        return;
+      }
+
+      if (countdownStarted.has(matchId)) {
+        logger.warn(`[JOIN_MATCH] Countdown deja marcat timerActive=${!!countdownTimers[matchId]} matchId=${matchId}`);
+        return;
+      }
+
+      // ─── Start countdown ───────────────────────────────────────────────────
+      logger.info(`[JOIN_MATCH] PORNESC COUNTDOWN matchId=${matchId}`);
+      countdownStarted.add(matchId);
+      await prisma.match.update({ where: { id: matchId }, data: { status: 'countdown' } });
+
+      let countdown = 5;
+      countdownTimers[matchId] = setInterval(async () => {
+        const socketsNow = await io.in(room).allSockets();
+        logger.info(`[COUNTDOWN] tick=${countdown} sockete=${socketsNow.size} matchId=${matchId}`);
+        io.to(room).emit(SOCKET_EVENTS.MATCH_COUNTDOWN, { countdown });
+        countdown--;
+        if (countdown < 0) {
+          clearInterval(countdownTimers[matchId]);
+          delete countdownTimers[matchId];
+          await prisma.match.update({ where: { id: matchId }, data: { status: 'active', startedAt: new Date() } });
+          io.to(room).emit(SOCKET_EVENTS.MATCH_START, { startedAt: new Date() });
+          logger.info(`[COUNTDOWN] MATCH_START emis room=${room}`);
+          const rules = GAME_RULES[match.gameType] || GAME_RULES['integrame'];
+          matchTimers[matchId] = setTimeout(() => autoFinishMatch(io, matchId, room), rules.timeLimit * 1000);
+        }
+      }, 1000);
+
     } catch (err) {
       logger.error('JOIN_MATCH error', { userId, err });
       socket.emit(SOCKET_EVENTS.ERROR, { message: 'Server error' });

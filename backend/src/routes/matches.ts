@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import prisma from '../prisma';
+import logger from '../logger';
 import { MAX_PLAYERS_PER_LEVEL, GameLevel } from '@integrame/shared';
 
 const router = Router();
@@ -37,6 +38,7 @@ router.post('/find-or-create', requireAuth, async (req: AuthRequest & import('ex
       data: { matchId: existing.id, userId: req.userId!, score: 0, xpGained: 0, eloChange: 0 },
     });
     const updated = await prisma.match.findUnique({ where: { id: existing.id }, include: { players: { include: { user: true } } } });
+    logger.info(`[find-or-create] JOIN existing match=${existing.id} user=${req.userId} players=${updated?.players.length}`);
     return res.json(updated);
   }
 
@@ -54,7 +56,37 @@ router.post('/find-or-create', requireAuth, async (req: AuthRequest & import('ex
     },
     include: { players: { include: { user: true } } },
   });
+  logger.info(`[find-or-create] CREATE new match=${match.id} user=${req.userId} isAI=${isAI}`);
   return res.status(201).json(match);
+});
+
+// POST /api/matches/:id/join  – join via direct link
+router.post('/:id/join', requireAuth, async (req: AuthRequest & import('express').Request, res: Response) => {
+  const matchId = (req as import('express').Request).params['id'];
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { players: { include: { user: true } } },
+  });
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.status !== 'waiting') return res.status(409).json({ error: 'Match already started' });
+
+  const maxPlayers = MAX_PLAYERS_PER_LEVEL[match.level as GameLevel];
+  const alreadyIn = match.players.find((p: any) => p.userId === req.userId);
+  if (alreadyIn) {
+    // already a player, just return match
+    return res.json(match);
+  }
+  if (match.players.length >= maxPlayers) return res.status(409).json({ error: 'Match is full' });
+
+  await prisma.matchPlayer.create({
+    data: { matchId, userId: req.userId!, score: 0, xpGained: 0, eloChange: 0 },
+  });
+  const updated = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { players: { include: { user: true } } },
+  });
+  logger.info(`[join-direct] user=${req.userId} joined match=${matchId} players=${updated?.players.length}`);
+  return res.json(updated);
 });
 
 // GET /api/matches/:id

@@ -79,12 +79,15 @@ export const usersApi = {
 };
 
 // ─── Matches ──────────────────────────────────────────────────────────────────
-export const matchesApi = {
+const matchesApi = {
   findOrCreate: (gameType: string, level: number, isAI = false) =>
     api.post('/matches/find-or-create', { gameType, level, isAI }),
   getMatch: (id: string) => api.get(`/matches/${id}`),
   getHistory: () => api.get('/matches/history/me'),
+  joinMatch: (id: string) => api.post(`/matches/${id}/join`, {}),
 };
+
+export { matchesApi };
 
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
 export const leaderboardApi = {

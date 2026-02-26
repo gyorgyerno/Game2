@@ -80,20 +80,36 @@ function GamePlayPageInner({ params }: PageProps) {
   }, [isAI, matchId, token]);
 
   useEffect(() => {
-    if (!matchId || !token) return;
-    matchesApi.getMatch(matchId).then((r) => {
-      setMatch(r.data);
-      if (r.data?.status === 'active') { setStarted(true); }
+    if (!matchId || !token || !user) return;
+    matchesApi.getMatch(matchId).then(async (r) => {
+      const m = r.data;
+      // Dacă userul nu e în meci dar meciul e waiting → auto-join (acces prin link direct)
+      const isPlayer = m?.players?.find((p: any) => p.userId === user.id);
+      if (m?.status === 'waiting' && !isPlayer && !isAI) {
+        try {
+          const joined = await matchesApi.joinMatch(matchId);
+          setMatch(joined.data);
+          if (joined.data?.status === 'active') setStarted(true);
+          return;
+        } catch { /* match full sau deja pornit – continuăm fără join */ }
+      }
+      setMatch(m);
+      if (m?.status === 'active') { setStarted(true); }
     }).catch(() => {});
 
     const socket = getSocket();
     socket.emit(SOCKET_EVENTS.JOIN_MATCH, { matchId });
 
+    // Re-join room when socket reconnects (backend restart / brief disconnect)
+    const handleReconnect = () => {
+      socket.emit(SOCKET_EVENTS.JOIN_MATCH, { matchId });
+    };
+    socket.on('connect', handleReconnect);
+
     socket.on(SOCKET_EVENTS.MATCH_STATE, (m: Match) => {
       setMatch(m);
-      // Daca userul se alatura dupa ce meciul a inceput
       if (m.status === 'active') { setCountdown(null); setStarted(true); }
-      // Daca meciul e deja terminat (user reconectat), redirecteaza imediat
+      if (m.status === 'countdown') { setCountdown(3); }
       if (m.status === 'finished') {
         setTimeout(() => router.push(`/games/${gameType}/result?matchId=${matchId}`), 500);
       }
@@ -108,7 +124,6 @@ function GamePlayPageInner({ params }: PageProps) {
       const me = final.players.find((p: any) => p.userId === user?.id);
       if (me) {
         setXpEarned(me.xpGained);
-        // Check level up (simplified)
         if ((user?.xp ?? 0) + me.xpGained > 500) setLevelUp({ show: true, level: 2 });
       }
       setTimeout(() => router.push(`/games/${gameType}/result?matchId=${matchId}`), 2000);
@@ -120,7 +135,35 @@ function GamePlayPageInner({ params }: PageProps) {
       setLastReaction({ userId: fromId, emoji, fromMe: fromId === user?.id });
     });
 
+    // Heartbeat: la fiecare 2s cât jocul nu a pornit:
+    // 1) re-emit JOIN_MATCH → rămâne în room
+    // 2) fetch HTTP → dacă status e active/countdown, pornește jocul
+    let heartbeatActive = true;
+    const heartbeatInterval = setInterval(async () => {
+      if (!heartbeatActive) return;
+      // Re-join room periodic (no-op dacă e deja în room, esențial dacă s-a deconectat)
+      socket.emit(SOCKET_EVENTS.JOIN_MATCH, { matchId });
+      try {
+        const r = await matchesApi.getMatch(matchId);
+        const m: Match = r.data;
+        setMatch(m);
+        if (m.status === 'active') {
+          setCountdown(null);
+          setStarted(true);
+          heartbeatActive = false;
+        } else if (m.status === 'countdown') {
+          setCountdown(3);
+        } else if (m.status === 'finished') {
+          heartbeatActive = false;
+          setTimeout(() => router.push(`/games/${gameType}/result?matchId=${matchId}`), 500);
+        }
+      } catch { /* ignore */ }
+    }, 2000);
+
     return () => {
+      heartbeatActive = false;
+      clearInterval(heartbeatInterval);
+      socket.off('connect', handleReconnect);
       socket.off(SOCKET_EVENTS.MATCH_STATE);
       socket.off(SOCKET_EVENTS.MATCH_COUNTDOWN);
       socket.off(SOCKET_EVENTS.MATCH_START);
@@ -130,7 +173,7 @@ function GamePlayPageInner({ params }: PageProps) {
       socket.off(SOCKET_EVENTS.REACTION_RECEIVED);
       socket.emit(SOCKET_EVENTS.LEAVE_MATCH, { matchId });
     };
-  }, [matchId, token]);
+  }, [matchId, token, user?.id]);
 
   function handleWordComplete(wordId: number, correct: boolean) {
     if (correct) setCorrectWords((n) => n + 1);
@@ -250,6 +293,9 @@ function GamePlayPageInner({ params }: PageProps) {
                   ? '✅ Toți jucătorii sunt pregătiți!'
                   : `⏳ Se așteaptă jucători... (${match.players.length}/${maxPlayers})`}
               </p>
+              <div className="flex items-center gap-2 text-xs font-semibold px-3 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                🎯 Nivel {match.level} · max {maxPlayers} jucători · celălalt jucător trebuie să selecteze același nivel
+              </div>
               <p className="text-gray-400 text-xs">Meciul pornește automat când sunt toți prezenți</p>
               {match.players.length < maxPlayers && (
                 <button
