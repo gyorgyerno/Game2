@@ -1,0 +1,180 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  username     String   @unique
+  avatarUrl    String?
+  rating       Int      @default(1000)
+  xp           Int      @default(0)
+  league       String   @default("bronze")
+  referralCode String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  matchPlayers MatchPlayer[]
+  gameStats    UserGameStats[]
+  invitesCreated Invite[]     @relation("InviteCreator")
+  sentFriendships     Friendship[] @relation("FriendshipSender")
+  receivedFriendships Friendship[] @relation("FriendshipReceiver")
+
+  @@index([rating])
+  @@map("users")
+}
+
+// ─── OTP ──────────────────────────────────────────────────────────────────────
+model OTP {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("otps")
+}
+
+// ─── GameType ─────────────────────────────────────────────────────────────────
+model GameType {
+  id          String  @id
+  name        String
+  description String
+  iconUrl     String?
+  isActive    Boolean @default(true)
+
+  matches Match[]
+
+  @@map("game_types")
+}
+
+// ─── Match ────────────────────────────────────────────────────────────────────
+model Match {
+  id          String      @id @default(uuid())
+  gameType    String
+  level       Int         @default(1)
+  status      String      @default("waiting") // waiting|countdown|active|finished
+  isAI        Boolean     @default(false)
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime    @default(now())
+
+  gameTypeRef GameType?   @relation(fields: [gameType], references: [id])
+  players     MatchPlayer[]
+  invites     Invite[]
+
+  @@index([gameType, level, status])
+  @@map("matches")
+}
+
+// ─── MatchPlayer ──────────────────────────────────────────────────────────────
+model MatchPlayer {
+  id              String    @id @default(uuid())
+  matchId         String
+  userId          String
+  score           Int       @default(0)
+  correctAnswers  Int       @default(0)
+  mistakes        Int       @default(0)
+  xpGained        Int       @default(0)
+  eloChange       Int       @default(0)
+  position        Int?
+  isFirstFinisher Boolean   @default(false)
+  finishedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  match Match @relation(fields: [matchId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([matchId, userId])
+  @@map("match_players")
+}
+
+// ─── Invite ───────────────────────────────────────────────────────────────────
+model Invite {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  matchId   String?
+  gameType  String
+  level     Int      @default(1)
+  createdBy String
+  expiresAt DateTime
+  maxUses   Int      @default(1)
+  usedBy    String   @default("[]")
+  createdAt DateTime @default(now())
+
+  creator User   @relation("InviteCreator", fields: [createdBy], references: [id])
+  match   Match? @relation(fields: [matchId], references: [id])
+
+  @@map("invites")
+}
+
+// ─── UserGameStats ────────────────────────────────────────────────────────────
+model UserGameStats {
+  id            String   @id @default(uuid())
+  userId        String
+  gameType      String
+  level         Int
+  totalMatches  Int      @default(0)
+  wins          Int      @default(0)
+  losses        Int      @default(0)
+  draws         Int      @default(0)
+  totalScore    Int      @default(0)
+  bestScore     Int      @default(0)
+  avgScore      Float    @default(0)
+  currentStreak Int      @default(0)
+  bestStreak    Int      @default(0)
+  eloHistory    String   @default("[]")
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, gameType, level], name: "userId_gameType_level")
+  @@map("user_game_stats")
+}
+
+// ─── Admin ────────────────────────────────────────────────────────────────────
+model Admin {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@map("admins")
+}
+
+// ─── Season ───────────────────────────────────────────────────────────────────
+model Season {
+  id        String   @id @default(uuid())
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("seasons")
+}
+
+// ─── Friendship ───────────────────────────────────────────────────────────────
+model Friendship {
+  id         String   @id @default(uuid())
+  senderId   String
+  receiverId String
+  status     String   @default("pending") // pending|accepted|declined
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  sender   User @relation("FriendshipSender",   fields: [senderId],   references: [id])
+  receiver User @relation("FriendshipReceiver", fields: [receiverId], references: [id])
+
+  @@unique([senderId, receiverId])
+  @@map("friendships")
+}

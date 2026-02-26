@@ -1,0 +1,128 @@
+import axios, { AxiosError } from 'axios';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+
+export const api = axios.create({
+  baseURL: `${API_URL}/api`,
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 10000, // 10 secunde – dacă backend-ul nu răspunde, eroare rapidă
+});
+
+// Attach auth token automatically
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ─── Global error interceptor ─────────────────────────────────────────────────
+api.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    const status = error.response?.status ?? 0;
+    const url = error.config?.url ?? '';
+    const method = (error.config?.method ?? 'GET').toUpperCase();
+    const detail = (error.response?.data as Record<string, unknown>)?.error ?? error.message;
+
+    // Auto-logout on 401
+    if (status === 401 && typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.replace('/login');
+      }
+    }
+
+    // Log to browser console (visible in DevTools → Console)
+    console.error(`[API] ${method} ${url} → ${status}`, detail);
+
+    // Send to backend log endpoint (best-effort, no await)
+    if (typeof window !== 'undefined') {
+      fetch(`${API_URL}/api/logs/client`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'axios-error',
+          method,
+          url,
+          status,
+          message: String(detail),
+          ts: new Date().toISOString(),
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+export const authApi = {
+  sendOtp: (email: string) => api.post('/auth/send-otp', { email }),
+  login: (email: string, otp: string) => api.post('/auth/login', { email, otp }),
+  register: (email: string, username: string, otp: string, referralCode?: string) =>
+    api.post('/auth/register', { email, username, otp, referralCode }),
+};
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+export const usersApi = {
+  getMe: () => api.get('/users/me'),
+  getUser: (id: string) => api.get(`/users/${id}`),
+  updateMe: (data: { username?: string; avatarUrl?: string }) => api.patch('/users/me', data),
+  uploadAvatar: (file: File) => {
+    const form = new FormData();
+    form.append('avatar', file);
+    return api.post('/users/me/avatar', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+};
+
+// ─── Matches ──────────────────────────────────────────────────────────────────
+export const matchesApi = {
+  findOrCreate: (gameType: string, level: number, isAI = false) =>
+    api.post('/matches/find-or-create', { gameType, level, isAI }),
+  getMatch: (id: string) => api.get(`/matches/${id}`),
+  getHistory: () => api.get('/matches/history/me'),
+};
+
+// ─── Leaderboard ─────────────────────────────────────────────────────────────
+export const leaderboardApi = {
+  get: (params?: { gameType?: string; level?: number; page?: number }) =>
+    api.get('/leaderboard', { params }),
+};
+
+// ─── Invites ─────────────────────────────────────────────────────────────────
+export const invitesApi = {
+  create: (data: { gameType: string; level: number; matchId?: string }) =>
+    api.post('/invites', data),
+  get: (code: string) => api.get(`/invites/${code}`),
+  accept: (code: string) => api.post(`/invites/${code}/accept`),
+};
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+export const statsApi = {
+  getMyStats: (gameType?: string, level?: number) =>
+    api.get('/stats/me', { params: { gameType, level } }),
+  getUserStats: (userId: string, gameType?: string, level?: number) =>
+    api.get(`/stats/${userId}`, { params: { gameType, level } }),
+};
+
+// ─── AI ───────────────────────────────────────────────────────────────────────
+export const aiApi = {
+  generatePuzzle: (matchId?: string, level?: number, theme?: string, elo?: number) =>
+    api.post('/ai/generate-puzzle', { matchId, level, theme, elo }),
+  getPuzzle: (matchId: string) =>
+    api.get(`/ai/puzzle/${matchId}`),
+  getThemes: () =>
+    api.get('/ai/themes'),
+};
+
+// ─── Friends ───────────────────────────────────────────────────────────────
+export const friendsApi = {
+  sendRequest:    (username: string) => api.post('/friends/request', { username }),
+  list:           ()                 => api.get('/friends'),
+  requests:       ()                 => api.get('/friends/requests'),
+  accept:         (id: string)       => api.post(`/friends/${id}/accept`),
+  remove:         (id: string)       => api.delete(`/friends/${id}`),
+};

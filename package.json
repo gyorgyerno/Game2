@@ -1,0 +1,28 @@
+{
+  "name": "integrame-platform",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend-web",
+    "mobile-app"
+  ],
+  "scripts": {
+    "dev": "concurrently --names \"BACKEND,FRONTEND\" --prefix-colors \"cyan,magenta\" \"npm run dev:backend\" \"npm run dev:web\"",
+    "dev:web": "cmd /c \"cd /d G:\\Integrame\\frontend-web && node G:\\Integrame\\node_modules\\next\\dist\\bin\\next dev -p 3000\"",
+    "dev:backend": "cmd /c \"cd /d G:\\Integrame\\backend && G:\\Integrame\\node_modules\\.bin\\tsc.cmd -p tsconfig.json && node dist/index.js\"",
+    "build:shared": "npm explore @integrame/shared -- npm run build",
+    "build:web": "npm explore @integrame/frontend-web -- npm run build",
+    "build:backend": "cmd /c \"cd /d backend && g:\\Integrame\\node_modules\\.bin\\tsc.cmd -p tsconfig.json\"",
+    "db:migrate": "cmd /c \"cd /d backend && g:\\Integrame\\node_modules\\.bin\\prisma.cmd migrate dev\"",
+    "db:seed": "cmd /c \"cd /d backend && g:\\Integrame\\node_modules\\.bin\\ts-node-dev.cmd prisma/seed.ts\"",
+    "db:generate": "cmd /c \"cd /d backend && g:\\Integrame\\node_modules\\.bin\\prisma.cmd generate\"",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.3.3"
+  }
+}

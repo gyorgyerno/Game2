@@ -1,0 +1,39 @@
+node_modules/
+
+# Environment variables (conțin chei secrete - nu se urcă niciodată)
+.env
+.env.local
+.env.production
+
+# Build outputs
+dist/
+.next/
+.expo/
+build/
+out/
+
+# SQLite database (date locale - nu se urcă pe GitHub)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+*.log.gz
+logs/
+backend/logs/
+
+# Testing
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# User uploaded files (nu urcăm fișierele utilizatorilor, dar păstrăm folderul)
+backend/public/uploads/*
+!backend/public/uploads/.gitkeep
+
+# Editor
+.vscode/settings.json

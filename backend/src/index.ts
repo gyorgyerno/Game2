@@ -1,0 +1,105 @@
+import 'dotenv/config';
+import path from 'path';
+import express from 'express';
+import http from 'http';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { config } from './config';
+import logger from './logger';
+import { requestLogger } from './middleware/requestLogger';
+import { globalErrorHandler } from './middleware/errorHandler';
+import { initSocket } from './socket';
+import authRoutes from './routes/auth';
+import matchRoutes from './routes/matches';
+import leaderboardRoutes from './routes/leaderboard';
+import inviteRoutes from './routes/invites';
+import statsRoutes from './routes/stats';
+import userRoutes from './routes/users';
+import logsRoutes from './routes/logs';
+import adminRoutes from './routes/admin';
+import aiRoutes from './routes/ai';
+import friendRoutes from './routes/friends';
+import prisma from './prisma';
+
+const app = express();
+const server = http.createServer(app);
+
+// ─── Middleware ────────────────────────────────────────────────────────────────
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(cors({ origin: config.clientUrl, credentials: true }));
+app.use(express.json());
+// Servire imagini de profil uploadate
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+app.use(requestLogger);   // ← HTTP request/response logging
+app.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 200,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/matches', matchRoutes);
+app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/invites', inviteRoutes);
+app.use('/api/stats', statsRoutes);
+app.use('/api/logs', logsRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/friends', friendRoutes);
+
+app.get('/health', (_req: import('express').Request, res: import('express').Response) =>
+  res.json({ status: 'ok', ts: new Date() })
+);
+
+// ─── 404 handler ──────────────────────────────────────────────────────────────
+app.use((_req: import('express').Request, res: import('express').Response) =>
+  res.status(404).json({ error: 'Route not found' })
+);
+
+// ─── Global error handler (MUST be last) ──────────────────────────────────────
+app.use(globalErrorHandler);
+
+// ─── Socket ───────────────────────────────────────────────────────────────────
+initSocket(server);
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+server.listen(config.port, async () => {
+  logger.info(`🚀 Backend pornit pe http://localhost:${config.port}`, {
+    env: process.env['NODE_ENV'] ?? 'development',
+    port: config.port,
+  });
+
+  // Verify DB connection
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    logger.info('✅ Conexiune DB reușită (SQLite)');
+  } catch (err) {
+    logger.error('❌ Conexiune DB eșuată', { err });
+  }
+
+  // Seed date de baza (game_types)
+  try {
+    const gameTypes = [
+      { id: 'integrame', name: 'Integrame', description: 'Rezolva integrame cu alti jucatori' },
+      { id: 'cuvinte', name: 'Cuvinte', description: 'Joc cu cuvinte' },
+    ];
+    for (const gt of gameTypes) {
+      await prisma.gameType.upsert({
+        where: { id: gt.id },
+        update: {},
+        create: { ...gt, isActive: true },
+      });
+    }
+    logger.info('✅ Game types seeded');
+  } catch (err) {
+    logger.error('❌ Seed game types esuat', { err });
+  }
+});
+
+export default app;
