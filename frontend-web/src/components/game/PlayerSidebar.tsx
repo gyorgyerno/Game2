@@ -41,6 +41,13 @@ export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, 
 
   const emptySlots = Math.max(0, Math.min(4, maxPlayers) - players.length);
 
+  // Eu primul, restul după
+  const sortedPlayers = [...players].sort((a, b) => {
+    if (a.userId === myUserId) return -1;
+    if (b.userId === myUserId) return 1;
+    return 0;
+  });
+
   return (
     <aside className="fixed left-0 top-14 bottom-0 w-[180px] border-r border-gray-100 bg-white flex flex-col items-center pt-4 pb-6 gap-3 overflow-y-auto z-30">
       {/* Invite label */}
@@ -49,7 +56,7 @@ export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, 
       </div>
 
       {/* Players */}
-      {players.map((p, idx) => {
+      {sortedPlayers.map((p, idx) => {
         const isMe = p.userId === myUserId;
         const avatarUrl = p.user?.avatarUrl;
         const username = p.user?.username || 'Player';

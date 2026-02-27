@@ -258,12 +258,13 @@ async function handlePlayerLeft(io: SocketServer, userId: string, matchId: strin
     data: { score: 0, finishedAt: now, correctAnswers: 0, mistakes: 0 },
   });
 
-  // Marcheaza ceilalti jucatori ca terminati daca nu sunt deja
+  // Marcheaza ceilalti jucatori ca terminati + bonus forfeit 10 pts
+  const FORFEIT_BONUS = 10;
   for (const p of match.players) {
     if (p.userId !== userId && !p.finishedAt) {
       await prisma.matchPlayer.updateMany({
         where: { matchId, userId: p.userId },
-        data: { finishedAt: now },
+        data: { finishedAt: now, score: { increment: FORFEIT_BONUS } },
       });
     }
   }
@@ -278,7 +279,7 @@ async function handlePlayerLeft(io: SocketServer, userId: string, matchId: strin
 
   // Finalizeaza dupa o mica pauza (2s) ca frontend-ul sa primeasca notificarea
   setTimeout(() => {
-    finalizeMatch(io, matchId, room).catch(() => {});
+    finalizeMatch(io, matchId, room, userId).catch(() => {});
   }, 2000);
 }
 
@@ -307,7 +308,7 @@ async function autoFinishMatch(io: SocketServer, matchId: string, room: string) 
 }
 
 // ─── Finalize: calculate ELO, XP, update DB, emit results ────────────────────
-async function finalizeMatch(io: SocketServer, matchId: string, room: string) {
+async function finalizeMatch(io: SocketServer, matchId: string, room: string, forfeitUserId?: string) {
   // Curăță orice timere active și tracking
   countdownStarted.delete(matchId);
   if (countdownTimers[matchId]) {
@@ -326,8 +327,14 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string) {
     });
     if (!match) return;
 
-    // Sort by score descending
-    const sorted = [...match.players].sort((a, b) => b.score - a.score);
+    // Sort by score descending; forfeit player always last
+    const sorted = [...match.players].sort((a, b) => {
+      if (forfeitUserId) {
+        if (a.userId === forfeitUserId) return 1;
+        if (b.userId === forfeitUserId) return -1;
+      }
+      return b.score - a.score;
+    });
     const totalPlayers = sorted.length;
     const allRatings = match.players.map((p: any) => p.user.rating);
 

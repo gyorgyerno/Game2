@@ -48,9 +48,14 @@ function GameResultPageInner({ params }: PageProps) {
     </div>
   );
 
-  const sorted = [...(match.players || [])].sort((a: any, b: any) => b.score - a.score);
+  // Sortare după position (setat corect în backend, inclusiv la forfeit)
+  // Fallback la score dacă position nu e setat (ex. meci vechi)
+  const sorted = [...(match.players || [])].sort((a: any, b: any) => {
+    if (a.position != null && b.position != null) return a.position - b.position;
+    return b.score - a.score;
+  });
   const myResult = sorted.find((p: any) => p.userId === user?.id);
-  const myPos = sorted.indexOf(myResult) + 1;
+  const myPos = myResult?.position ?? (sorted.indexOf(myResult) + 1);
 
   return (
     <div className="game-page min-h-screen bg-white">
