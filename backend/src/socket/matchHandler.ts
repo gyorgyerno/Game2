@@ -3,12 +3,11 @@ import prisma from '../prisma';
 import logger from '../logger';
 import {
   SOCKET_EVENTS,
-  calculateScore,
   calculateXPGained,
   calculateELO,
   ratingToLeague,
-  GAME_RULES,
 } from '@integrame/shared';
+import { gameRegistry } from '../games/GameRegistry';
 
 const countdownTimers: Record<string, ReturnType<typeof setInterval>> = {};
 const matchTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -86,7 +85,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           await prisma.match.update({ where: { id: matchId }, data: { status: 'active', startedAt: new Date() } });
           io.to(room).emit(SOCKET_EVENTS.MATCH_START, { startedAt: new Date() });
           logger.info(`[COUNTDOWN] MATCH_START emis room=${room}`);
-          const rules = GAME_RULES[match.gameType] || GAME_RULES['integrame'];
+          const rules = gameRegistry.getRules(match.gameType) ?? gameRegistry.getRules('integrame')!;
           matchTimers[matchId] = setTimeout(() => autoFinishMatch(io, matchId, room), rules.timeLimit * 1000);
         }
       }, 1000);
@@ -108,14 +107,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
         });
         if (!match || match.status !== 'active') return;
 
-        const rules = GAME_RULES[match.gameType] || GAME_RULES['integrame'];
-        const liveScore = calculateScore({
-          correctAnswers,
-          mistakes,
-          isFirstFinisher: false,
-          hasFinished: false,
-          rules,
-        });
+        const liveScore = gameRegistry.calculateLiveScore(match.gameType, correctAnswers, mistakes);
 
         await prisma.matchPlayer.updateMany({
           where: { matchId, userId },
@@ -154,14 +146,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
         const finishedPlayers = match.players.filter((p: any) => p.finishedAt);
         const isFirst = finishedPlayers.length === 0;
 
-        const rules = GAME_RULES[match.gameType] || GAME_RULES['integrame'];
-        const finalScore = calculateScore({
-          correctAnswers,
-          mistakes,
-          isFirstFinisher: isFirst,
-          hasFinished: true,
-          rules,
-        });
+        const finalScore = gameRegistry.calculateFinalScore(match.gameType, correctAnswers, mistakes, isFirst);
 
         await prisma.matchPlayer.updateMany({
           where: { matchId, userId },
@@ -259,8 +244,8 @@ async function handlePlayerLeft(io: SocketServer, userId: string, matchId: strin
     data: { score: 0, finishedAt: now, correctAnswers: 0, mistakes: 0 },
   });
 
-  // Marcheaza ceilalti jucatori ca terminati + bonus forfeit 10 pts
-  const FORFEIT_BONUS = 10;
+  // Marcheaza ceilalti jucatori ca terminati + bonus forfeit (per joc)
+  const FORFEIT_BONUS = gameRegistry.getForfeitBonus(match.gameType);
   for (const p of match.players) {
     if (p.userId !== userId && !p.finishedAt) {
       await prisma.matchPlayer.updateMany({
