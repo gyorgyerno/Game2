@@ -47,8 +47,9 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
       }
 
       if (match.status === 'countdown') {
-        logger.info(`[JOIN_MATCH] COUNTDOWN → trimit MATCH_COUNTDOWN(3) user=${userId}`);
-        socket.emit(SOCKET_EVENTS.MATCH_COUNTDOWN, { countdown: 3 });
+        // Re-join room silentios – nu trimitem countdown hardcodat
+        // Countdown-ul real se emite prin io.to(room) din setInterval
+        logger.info(`[JOIN_MATCH] COUNTDOWN → re-join silentios user=${userId}`);
         return;
       }
 

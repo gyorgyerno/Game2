@@ -135,24 +135,25 @@ function GamePlayPageInner({ params }: PageProps) {
       setLastReaction({ userId: fromId, emoji, fromMe: fromId === user?.id });
     });
 
-    // Heartbeat: la fiecare 2s cât jocul nu a pornit:
-    // 1) re-emit JOIN_MATCH → rămâne în room
-    // 2) fetch HTTP → dacă status e active/countdown, pornește jocul
+    // Heartbeat: la fiecare 2s DOAR cât meciul e în 'waiting'
+    // Odată ce countdown-ul a început, oprim heartbeat-ul → nu mai interferează cu numerele
     let heartbeatActive = true;
     const heartbeatInterval = setInterval(async () => {
       if (!heartbeatActive) return;
-      // Re-join room periodic (no-op dacă e deja în room, esențial dacă s-a deconectat)
-      socket.emit(SOCKET_EVENTS.JOIN_MATCH, { matchId });
       try {
         const r = await matchesApi.getMatch(matchId);
         const m: Match = r.data;
-        setMatch(m);
-        if (m.status === 'active') {
+        if (m.status === 'waiting') {
+          // Încă așteptăm → re-join room ca să nu cădem din socket room
+          socket.emit(SOCKET_EVENTS.JOIN_MATCH, { matchId });
+          setMatch(m);
+        } else if (m.status === 'active') {
+          heartbeatActive = false;
           setCountdown(null);
           setStarted(true);
-          heartbeatActive = false;
         } else if (m.status === 'countdown') {
-          setCountdown(3);
+          // Countdown real gestionat prin socket events → oprim heartbeat-ul
+          heartbeatActive = false;
         } else if (m.status === 'finished') {
           heartbeatActive = false;
           setTimeout(() => router.push(`/games/${gameType}/result?matchId=${matchId}`), 500);
