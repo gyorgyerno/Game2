@@ -93,6 +93,92 @@ router.get('/simulated-players/health', adminAuth, asyncHandler(async (_req: Adm
   });
 }));
 
+// ─── GET /api/admin/simulated-players/config ────────────────────────────────
+router.get('/simulated-players/config', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const botConfig = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });
+
+  if (botConfig) {
+    res.json({ botConfig });
+    return;
+  }
+
+  const created = await prisma.botConfig.create({
+    data: {
+      id: 'default-bot-config',
+      enabled: false,
+      maxBotsOnline: 6,
+      botScoreLimit: 5000,
+      activityFeedEnabled: false,
+      chatEnabled: false,
+    },
+  });
+
+  res.json({ botConfig: created });
+}));
+
+// ─── PATCH /api/admin/simulated-players/config ──────────────────────────────
+router.patch('/simulated-players/config', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const {
+    enabled,
+    maxBotsOnline,
+    botScoreLimit,
+    activityFeedEnabled,
+    chatEnabled,
+  } = req.body as {
+    enabled?: boolean;
+    maxBotsOnline?: number;
+    botScoreLimit?: number;
+    activityFeedEnabled?: boolean;
+    chatEnabled?: boolean;
+  };
+
+  if (maxBotsOnline !== undefined && (!Number.isInteger(maxBotsOnline) || maxBotsOnline < 0 || maxBotsOnline > 500)) {
+    res.status(400).json({ error: 'maxBotsOnline trebuie să fie integer între 0 și 500' });
+    return;
+  }
+
+  if (botScoreLimit !== undefined && (!Number.isInteger(botScoreLimit) || botScoreLimit < 0)) {
+    res.status(400).json({ error: 'botScoreLimit trebuie să fie integer >= 0' });
+    return;
+  }
+
+  for (const [key, value] of Object.entries({ enabled, activityFeedEnabled, chatEnabled })) {
+    if (value !== undefined && typeof value !== 'boolean') {
+      res.status(400).json({ error: `${key} trebuie să fie boolean` });
+      return;
+    }
+  }
+
+  const existing = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });
+  const targetId = existing?.id ?? 'default-bot-config';
+
+  const updated = await prisma.botConfig.upsert({
+    where: { id: targetId },
+    create: {
+      id: targetId,
+      enabled: enabled ?? false,
+      maxBotsOnline: maxBotsOnline ?? 6,
+      botScoreLimit: botScoreLimit ?? 5000,
+      activityFeedEnabled: activityFeedEnabled ?? false,
+      chatEnabled: chatEnabled ?? false,
+    },
+    update: {
+      ...(enabled !== undefined ? { enabled } : {}),
+      ...(maxBotsOnline !== undefined ? { maxBotsOnline } : {}),
+      ...(botScoreLimit !== undefined ? { botScoreLimit } : {}),
+      ...(activityFeedEnabled !== undefined ? { activityFeedEnabled } : {}),
+      ...(chatEnabled !== undefined ? { chatEnabled } : {}),
+    },
+  });
+
+  logger.info('[ADMIN] Simulated players config updated', {
+    admin: req.adminUsername,
+    botConfigId: updated.id,
+  });
+
+  res.json({ botConfig: updated });
+}));
+
 // ─── GET /api/admin/games ────────────────────────────────────────────────────
 router.get('/games', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
   const dbGameTypes = await prisma.gameType.findMany({
