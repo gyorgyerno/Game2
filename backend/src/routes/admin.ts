@@ -12,6 +12,7 @@ import { gameRegistry } from '../games/GameRegistry';
 import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/SimulatedMatchOrchestrator';
 import { activityFeedGenerator } from '../services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from '../services/simulatedPlayers/BotChatGenerator';
+import { runtimeMetricsMonitor } from '../services/simulatedPlayers/RuntimeMetricsMonitor';
 
 const router = Router();
 
@@ -96,6 +97,11 @@ router.get('/simulated-players/health', adminAuth, asyncHandler(async (_req: Adm
       waitingMatchesWithBots,
     },
     orchestrator: simulatedMatchOrchestrator.getHealthSnapshot(),
+    generators: {
+      activityFeed: activityFeedGenerator.getStatus(),
+      botChat: botChatGenerator.getStatus(),
+    },
+    runtimeMetrics: runtimeMetricsMonitor.getSnapshot(),
   });
 }));
 

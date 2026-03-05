@@ -24,6 +24,7 @@ import gamesRoutes from './routes/games';
 import prisma from './prisma';
 import { activityFeedGenerator } from './services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from './services/simulatedPlayers/BotChatGenerator';
+import { runtimeMetricsMonitor } from './services/simulatedPlayers/RuntimeMetricsMonitor';
 
 const app = express();
 const server = http.createServer(app);
@@ -108,6 +109,7 @@ server.listen(config.port, async () => {
 
   activityFeedGenerator.start();
   botChatGenerator.start();
+  runtimeMetricsMonitor.start();
 });
 
 export default app;

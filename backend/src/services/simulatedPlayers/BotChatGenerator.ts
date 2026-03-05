@@ -22,6 +22,8 @@ type BotChatStatus = {
   skippedDisabled: number;
   skippedCooldown: number;
   skippedNoCandidate: number;
+  lastDecisionCpuMs: number;
+  p95DecisionCpuMs: number;
   lastEmitAt?: string;
 };
 
@@ -37,6 +39,8 @@ class BotChatGenerator {
   private skippedDisabled = 0;
   private skippedCooldown = 0;
   private skippedNoCandidate = 0;
+  private lastDecisionCpuMs = 0;
+  private decisionSamplesMs: number[] = [];
 
   start(): void {
     if (this.timer) return;
@@ -67,6 +71,8 @@ class BotChatGenerator {
       skippedDisabled: this.skippedDisabled,
       skippedCooldown: this.skippedCooldown,
       skippedNoCandidate: this.skippedNoCandidate,
+      lastDecisionCpuMs: this.lastDecisionCpuMs,
+      p95DecisionCpuMs: this.computeP95(this.decisionSamplesMs),
       lastEmitAt: this.lastEmitAt?.toISOString(),
     };
   }
@@ -81,6 +87,7 @@ class BotChatGenerator {
   }
 
   private async tick(force: boolean): Promise<BotChatMessage | null> {
+    const startedAt = Date.now();
     this.totalTicks += 1;
 
     const botConfig = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });
@@ -89,12 +96,14 @@ class BotChatGenerator {
 
     if (!enabledByConfig || !enabledByFlags) {
       this.skippedDisabled += 1;
+      this.recordDecisionCpuMs(Date.now() - startedAt);
       return null;
     }
 
     const now = Date.now();
     if (!force && this.lastEmitAt && now - this.lastEmitAt.getTime() < this.minCooldownMs) {
       this.skippedCooldown += 1;
+      this.recordDecisionCpuMs(Date.now() - startedAt);
       return null;
     }
 
@@ -117,6 +126,7 @@ class BotChatGenerator {
 
     if (!candidates.length) {
       this.skippedNoCandidate += 1;
+      this.recordDecisionCpuMs(Date.now() - startedAt);
       return null;
     }
 
@@ -148,7 +158,22 @@ class BotChatGenerator {
       forced: force,
     });
 
+    this.recordDecisionCpuMs(Date.now() - startedAt);
+
     return message;
+  }
+
+  private recordDecisionCpuMs(value: number): void {
+    this.lastDecisionCpuMs = value;
+    this.decisionSamplesMs.push(value);
+    if (this.decisionSamplesMs.length > 300) this.decisionSamplesMs.shift();
+  }
+
+  private computeP95(values: number[]): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const index = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));
+    return sorted[index] ?? 0;
   }
 
   private parsePreferredGames(raw: string): string[] {
