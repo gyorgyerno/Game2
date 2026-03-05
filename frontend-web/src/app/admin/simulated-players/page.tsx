@@ -6,12 +6,17 @@ import {
   ActivityFeedRuntimeStatus,
   AIProfileRecord,
   BotConfig,
+  BotChatRuntimeMessage,
+  BotChatRuntimeStatus,
   createSimulatedPlayerProfile,
   generateActivityFeedRuntimeEvent,
+  generateBotChatRuntimeMessage,
   getActivityFeedRuntimeStatus,
+  getBotChatRuntimeStatus,
   getSimulatedPlayersFeatureStatus,
   listSimulatedPlayersAuditTrail,
   listActivityFeedRuntimeEvents,
+  listBotChatRuntimeMessages,
   getSimulatedPlayersConfig,
   getSimulatedPlayersHealth,
   listSimulatedPlayerProfiles,
@@ -76,6 +81,8 @@ export default function AdminSimulatedPlayersPage() {
   const [featureStatus, setFeatureStatus] = useState<SimulatedPlayersFeatureStatus | null>(null);
   const [feedStatus, setFeedStatus] = useState<ActivityFeedRuntimeStatus | null>(null);
   const [feedEvents, setFeedEvents] = useState<ActivityFeedRuntimeEvent[]>([]);
+  const [chatStatus, setChatStatus] = useState<BotChatRuntimeStatus | null>(null);
+  const [chatMessages, setChatMessages] = useState<BotChatRuntimeMessage[]>([]);
   const [auditEntries, setAuditEntries] = useState<SimulatedPlayersAuditEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -86,6 +93,8 @@ export default function AdminSimulatedPlayersPage() {
   const [refreshingFeatureStatus, setRefreshingFeatureStatus] = useState(false);
   const [refreshingFeed, setRefreshingFeed] = useState(false);
   const [generatingFeed, setGeneratingFeed] = useState(false);
+  const [refreshingChat, setRefreshingChat] = useState(false);
+  const [generatingChat, setGeneratingChat] = useState(false);
   const [refreshingAudit, setRefreshingAudit] = useState(false);
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -169,6 +178,15 @@ export default function AdminSimulatedPlayersPage() {
     setFeedEvents(events);
   };
 
+  const loadBotChatRuntime = async () => {
+    const [status, messages] = await Promise.all([
+      getBotChatRuntimeStatus(),
+      listBotChatRuntimeMessages(10),
+    ]);
+    setChatStatus(status);
+    setChatMessages(messages);
+  };
+
   const loadAuditTrail = async () => {
     const entries = await listSimulatedPlayersAuditTrail(30);
     setAuditEntries(entries);
@@ -184,6 +202,7 @@ export default function AdminSimulatedPlayersPage() {
         loadHealth(),
         loadFeatureStatus(),
         loadActivityFeedRuntime(),
+        loadBotChatRuntime(),
         loadAuditTrail(),
       ]);
     } catch (e: any) {
@@ -341,6 +360,37 @@ export default function AdminSimulatedPlayersPage() {
       setError(e?.response?.data?.error || 'Nu s-a putut genera event activity feed');
     } finally {
       setGeneratingFeed(false);
+    }
+  };
+
+  const refreshBotChat = async () => {
+    setRefreshingChat(true);
+    setError('');
+    try {
+      await loadBotChatRuntime();
+      toast('Bot chat refresh făcut');
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Nu s-a putut încărca bot chat runtime');
+    } finally {
+      setRefreshingChat(false);
+    }
+  };
+
+  const generateChatMessage = async () => {
+    setGeneratingChat(true);
+    setError('');
+    try {
+      const messageResult = await generateBotChatRuntimeMessage();
+      await loadBotChatRuntime();
+      if (messageResult) {
+        toast('Mesaj bot chat generat');
+      } else {
+        toast('Nu s-a generat mesaj (cooldown/flag/config/candidates)');
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Nu s-a putut genera mesaj bot chat');
+    } finally {
+      setGeneratingChat(false);
     }
   };
 
@@ -517,6 +567,75 @@ export default function AdminSimulatedPlayersPage() {
                     {chatGuardrailBlocked ? ' chat' : ''}
                     {chatGuardrailBlocked && feedGuardrailBlocked ? ' și' : ''}
                     {feedGuardrailBlocked ? ' activity feed' : ''}.
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
+          <section style={{
+            background: '#1a1d27', border: '1px solid #2d3748',
+            borderRadius: 12, padding: 20, marginBottom: 24,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ color: '#e2e8f0', fontSize: 18, fontWeight: 600 }}>
+                Bot chat runtime
+              </h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={refreshBotChat}
+                  disabled={refreshingChat}
+                  style={{
+                    padding: '8px 12px', background: refreshingChat ? '#374151' : '#334155', color: '#fff',
+                    border: 'none', borderRadius: 8, cursor: refreshingChat ? 'not-allowed' : 'pointer', fontSize: 13,
+                  }}
+                >
+                  {refreshingChat ? 'Refresh...' : 'Refresh'}
+                </button>
+                <button
+                  onClick={generateChatMessage}
+                  disabled={generatingChat}
+                  style={{
+                    padding: '8px 12px', background: generatingChat ? '#4b5563' : '#2563eb', color: '#fff',
+                    border: 'none', borderRadius: 8, cursor: generatingChat ? 'not-allowed' : 'pointer', fontSize: 13,
+                  }}
+                >
+                  {generatingChat ? 'Generate...' : 'Generate message'}
+                </button>
+              </div>
+            </div>
+
+            {!chatStatus ? (
+              <p style={{ color: '#64748b' }}>Bot chat runtime indisponibil.</p>
+            ) : (
+              <>
+                <div style={{
+                  background: '#0f1117', border: '1px solid #2d3748', borderRadius: 8,
+                  padding: '10px 12px', marginBottom: 10,
+                }}>
+                  <div style={{ color: '#94a3b8', fontSize: 12 }}>
+                    requested(DB): {chatStatus.configRequested.enabled ? 'ON' : 'OFF'} • runtime flags: SIM={chatStatus.runtimeFlags.simPlayers ? 'ON' : 'OFF'}, CHAT={chatStatus.runtimeFlags.chat ? 'ON' : 'OFF'} • effective={chatStatus.effectiveEnabled ? 'ON' : 'OFF'}
+                  </div>
+                  <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>
+                    tick={chatStatus.generator.tickMs}ms • cooldown={chatStatus.generator.minCooldownMs}ms • generated={chatStatus.generator.totalGenerated} • skippedDisabled={chatStatus.generator.skippedDisabled} • skippedCooldown={chatStatus.generator.skippedCooldown} • skippedNoCandidate={chatStatus.generator.skippedNoCandidate}
+                  </div>
+                </div>
+
+                {chatMessages.length === 0 ? (
+                  <p style={{ color: '#64748b' }}>Nu există încă mesaje bot chat în memorie.</p>
+                ) : (
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {chatMessages.map((entry) => (
+                      <div key={entry.id} style={{
+                        background: '#0f1117', border: '1px solid #2d3748', borderRadius: 8,
+                        padding: '9px 12px',
+                      }}>
+                        <div style={{ color: '#e2e8f0', fontSize: 13 }}>{entry.text}</div>
+                        <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>
+                          {new Date(entry.createdAt).toLocaleString('ro-RO')} • {entry.botUsername} • {entry.gameType}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </>

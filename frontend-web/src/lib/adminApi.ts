@@ -182,6 +182,39 @@ export type ActivityFeedRuntimeEvent = {
   createdAt: string;
 };
 
+export type BotChatRuntimeStatus = {
+  configRequested: {
+    enabled: boolean;
+  };
+  runtimeFlags: {
+    simPlayers: boolean;
+    chat: boolean;
+  };
+  effectiveEnabled: boolean;
+  generator: {
+    running: boolean;
+    tickMs: number;
+    minCooldownMs: number;
+    recentMessagesCount: number;
+    totalTicks: number;
+    totalGenerated: number;
+    skippedDisabled: number;
+    skippedCooldown: number;
+    skippedNoCandidate: number;
+    lastEmitAt?: string;
+  };
+};
+
+export type BotChatRuntimeMessage = {
+  id: string;
+  type: 'bot_chat';
+  text: string;
+  gameType: string;
+  botUserId: string;
+  botUsername: string;
+  createdAt: string;
+};
+
 export const getSimulatedPlayersConfig = async () => {
   const { data } = await adminApi.get<{ botConfig: BotConfig }>('/api/admin/simulated-players/config');
   return data.botConfig;
@@ -230,6 +263,23 @@ export const listActivityFeedRuntimeEvents = async (limit = 20) => {
 export const generateActivityFeedRuntimeEvent = async () => {
   const { data } = await adminApi.post<{ event: ActivityFeedRuntimeEvent | null }>('/api/admin/simulated-players/activity-feed/generate');
   return data.event;
+};
+
+export const getBotChatRuntimeStatus = async () => {
+  const { data } = await adminApi.get<BotChatRuntimeStatus>('/api/admin/simulated-players/bot-chat/status');
+  return data;
+};
+
+export const listBotChatRuntimeMessages = async (limit = 20) => {
+  const { data } = await adminApi.get<{ messages: BotChatRuntimeMessage[] }>('/api/admin/simulated-players/bot-chat/messages', {
+    params: { limit },
+  });
+  return data.messages;
+};
+
+export const generateBotChatRuntimeMessage = async () => {
+  const { data } = await adminApi.post<{ message: BotChatRuntimeMessage | null }>('/api/admin/simulated-players/bot-chat/generate');
+  return data.message;
 };
 
 export const listSimulatedPlayerProfiles = async (params: { page?: number; limit?: number; search?: string }) => {

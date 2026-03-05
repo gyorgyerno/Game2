@@ -23,6 +23,7 @@ import friendRoutes from './routes/friends';
 import gamesRoutes from './routes/games';
 import prisma from './prisma';
 import { activityFeedGenerator } from './services/simulatedPlayers/ActivityFeedGenerator';
+import { botChatGenerator } from './services/simulatedPlayers/BotChatGenerator';
 
 const app = express();
 const server = http.createServer(app);
@@ -106,6 +107,7 @@ server.listen(config.port, async () => {
   }
 
   activityFeedGenerator.start();
+  botChatGenerator.start();
 });
 
 export default app;

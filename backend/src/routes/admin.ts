@@ -11,6 +11,7 @@ import { asyncHandler } from '../middleware/errorHandler';
 import { gameRegistry } from '../games/GameRegistry';
 import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/SimulatedMatchOrchestrator';
 import { activityFeedGenerator } from '../services/simulatedPlayers/ActivityFeedGenerator';
+import { botChatGenerator } from '../services/simulatedPlayers/BotChatGenerator';
 
 const router = Router();
 
@@ -641,6 +642,41 @@ router.get('/simulated-players/activity-feed/events', adminAuth, asyncHandler(as
 router.post('/simulated-players/activity-feed/generate', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
   const event = await activityFeedGenerator.forceGenerate();
   res.json({ event });
+}));
+
+// ─── GET /api/admin/simulated-players/bot-chat/status ──────────────────────
+router.get('/simulated-players/bot-chat/status', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const botConfig = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });
+
+  const configRequested = {
+    enabled: Boolean(botConfig?.enabled && botConfig?.chatEnabled),
+  };
+
+  const runtimeFlags = {
+    simPlayers: config.features.simPlayersEnabled,
+    chat: config.features.botChatEnabled,
+  };
+
+  const effectiveEnabled = configRequested.enabled && runtimeFlags.simPlayers && runtimeFlags.chat;
+
+  res.json({
+    configRequested,
+    runtimeFlags,
+    effectiveEnabled,
+    generator: botChatGenerator.getStatus(),
+  });
+}));
+
+// ─── GET /api/admin/simulated-players/bot-chat/messages ────────────────────
+router.get('/simulated-players/bot-chat/messages', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const limit = parseInt((req.query.limit as string) || '20', 10);
+  res.json({ messages: botChatGenerator.getRecentMessages(limit) });
+}));
+
+// ─── POST /api/admin/simulated-players/bot-chat/generate ───────────────────
+router.post('/simulated-players/bot-chat/generate', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const message = await botChatGenerator.forceGenerate();
+  res.json({ message });
 }));
 
 // ─── GET /api/admin/games ────────────────────────────────────────────────────
