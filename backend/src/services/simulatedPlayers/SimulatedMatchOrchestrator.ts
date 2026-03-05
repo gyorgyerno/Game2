@@ -43,9 +43,82 @@ class SimulatedMatchOrchestrator {
     logger.info('[SimulatedMatchOrchestrator] skip', { reason, ...context });
   }
 
+  private isFillEnabled(): boolean {
+    return config.features.simPlayersEnabled || config.features.ghostPlayersEnabled;
+  }
+
+  private async resolveGhostCandidate(match: { gameType: string; level: number; id: string }, currentPlayerIds: string[]) {
+    if (!config.features.ghostPlayersEnabled) return null;
+
+    const ghostRun = await prisma.ghostRun.findFirst({
+      where: {
+        gameType: match.gameType,
+        difficulty: match.level,
+        playerId: { notIn: currentPlayerIds.length ? currentPlayerIds : ['__none__'] },
+      },
+      include: {
+        player: { select: { id: true, username: true, rating: true, xp: true, league: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!ghostRun || !ghostRun.player) return null;
+
+    const usernameSuffix = ghostRun.player.id.replace(/-/g, '').slice(0, 6);
+    const ghostEmail = `ghost.${ghostRun.player.id}@integrame.local`;
+    const ghostUsername = `Ghost_${ghostRun.player.username}_${usernameSuffix}`.slice(0, 40);
+
+    const ghostUser = await prisma.user.upsert({
+      where: { email: ghostEmail },
+      update: {
+        userType: 'GHOST',
+        username: ghostUsername,
+        rating: ghostRun.player.rating,
+        xp: ghostRun.player.xp,
+        league: ghostRun.player.league,
+      },
+      create: {
+        email: ghostEmail,
+        username: ghostUsername,
+        userType: 'GHOST',
+        rating: ghostRun.player.rating,
+        xp: ghostRun.player.xp,
+        league: ghostRun.player.league,
+      },
+    });
+
+    return {
+      userId: ghostUser.id,
+      joinType: 'GHOST' as const,
+      delayProfile: null,
+    };
+  }
+
+  private async resolveSimulatedCandidate(currentPlayerIds: string[]) {
+    if (!config.features.simPlayersEnabled) return null;
+
+    const candidate = await prisma.user.findFirst({
+      where: {
+        userType: 'SIMULATED',
+        aiProfile: { is: { enabled: true } },
+        id: { notIn: currentPlayerIds.length > 0 ? currentPlayerIds : ['__none__'] },
+      },
+      include: { aiProfile: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (!candidate) return null;
+
+    return {
+      userId: candidate.id,
+      joinType: 'SIMULATED' as const,
+      delayProfile: candidate.aiProfile,
+    };
+  }
+
   scheduleFill(params: ScheduleFillParams): void {
-    if (!config.features.simPlayersEnabled) {
-      this.registerSkip('feature_flag_off', { matchId: params.matchId });
+    if (!this.isFillEnabled()) {
+      this.registerSkip('feature_flags_off', { matchId: params.matchId });
       return;
     }
     if (params.maxPlayers <= 1) {
@@ -80,17 +153,17 @@ class SimulatedMatchOrchestrator {
         return;
       }
 
-      const simulatedPlayersInWaitingMatches = await prisma.matchPlayer.count({
+      const nonRealPlayersInWaitingMatches = await prisma.matchPlayer.count({
         where: {
-          user: { userType: 'SIMULATED' },
+          user: { userType: { in: ['SIMULATED', 'GHOST'] } },
           match: { status: 'waiting' },
         },
       });
 
-      if (simulatedPlayersInWaitingMatches >= botConfig.maxBotsOnline) {
+      if (nonRealPlayersInWaitingMatches >= botConfig.maxBotsOnline) {
         this.registerSkip('max_bots_online_reached', {
           matchId: params.matchId,
-          currentBots: simulatedPlayersInWaitingMatches,
+          currentBots: nonRealPlayersInWaitingMatches,
           maxBotsOnline: botConfig.maxBotsOnline,
         });
         return;
@@ -126,24 +199,18 @@ class SimulatedMatchOrchestrator {
 
       const currentPlayerIds = match.players.map((player) => player.userId);
 
-      const candidate = await prisma.user.findFirst({
-        where: {
-          userType: 'SIMULATED',
-          aiProfile: { is: { enabled: true } },
-          id: { notIn: currentPlayerIds.length > 0 ? currentPlayerIds : ['__none__'] },
-        },
-        include: { aiProfile: true },
-        orderBy: { createdAt: 'asc' },
-      });
+      const ghostCandidate = await this.resolveGhostCandidate(match, currentPlayerIds);
+      const simulatedCandidate = ghostCandidate ? null : await this.resolveSimulatedCandidate(currentPlayerIds);
+      const selectedCandidate = ghostCandidate ?? simulatedCandidate;
 
-      if (!candidate) {
-        this.registerSkip('no_simulated_candidate', {
+      if (!selectedCandidate) {
+        this.registerSkip('no_non_real_candidate', {
           matchId: params.matchId,
         });
         return;
       }
 
-      await behaviorEngine.sleep(behaviorEngine.resolveJoinDelayMs(candidate.aiProfile));
+      await behaviorEngine.sleep(behaviorEngine.resolveJoinDelayMs(selectedCandidate.delayProfile));
 
       const recheckMatch = await prisma.match.findUnique({
         where: { id: params.matchId },
@@ -161,11 +228,12 @@ class SimulatedMatchOrchestrator {
         return;
       }
 
-      const alreadyJoined = recheckMatch.players.some((player) => player.userId === candidate.id);
+      const alreadyJoined = recheckMatch.players.some((player) => player.userId === selectedCandidate.userId);
       if (alreadyJoined) {
         this.registerSkip('candidate_already_joined', {
           matchId: params.matchId,
-          simulatedUserId: candidate.id,
+          candidateUserId: selectedCandidate.userId,
+          candidateType: selectedCandidate.joinType,
         });
         return;
       }
@@ -173,16 +241,17 @@ class SimulatedMatchOrchestrator {
       await prisma.matchPlayer.create({
         data: {
           matchId: params.matchId,
-          userId: candidate.id,
+          userId: selectedCandidate.userId,
           score: 0,
           xpGained: 0,
           eloChange: 0,
         },
       });
 
-      logger.info('[SimulatedMatchOrchestrator] simulated player joined waiting match', {
+      logger.info('[SimulatedMatchOrchestrator] non-real player joined waiting match', {
         matchId: params.matchId,
-        simulatedUserId: candidate.id,
+        candidateUserId: selectedCandidate.userId,
+        candidateType: selectedCandidate.joinType,
       });
       this.totalJoined += 1;
       this.lastActionAt = new Date();
