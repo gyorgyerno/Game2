@@ -1,6 +1,7 @@
 import prisma from '../../prisma';
 import logger from '../../logger';
 import { config } from '../../config';
+import { behaviorEngine } from './BehaviorEngine';
 
 type ScheduleFillParams = {
   matchId: string;
@@ -16,7 +17,7 @@ class SimulatedMatchOrchestrator {
     if (this.scheduledMatches.has(params.matchId)) return;
 
     this.scheduledMatches.add(params.matchId);
-    const delayMs = this.randomDelay(1200, 3200);
+    const delayMs = behaviorEngine.resolveJoinDelayMs();
 
     setTimeout(() => {
       this.tryFillOneSlot(params).catch((error) => {
@@ -58,6 +59,20 @@ class SimulatedMatchOrchestrator {
         return;
       }
 
+      await behaviorEngine.sleep(behaviorEngine.resolveJoinDelayMs(candidate.aiProfile));
+
+      const recheckMatch = await prisma.match.findUnique({
+        where: { id: params.matchId },
+        include: { players: true },
+      });
+
+      if (!recheckMatch || recheckMatch.status !== 'waiting' || recheckMatch.players.length >= params.maxPlayers) {
+        return;
+      }
+
+      const alreadyJoined = recheckMatch.players.some((player) => player.userId === candidate.id);
+      if (alreadyJoined) return;
+
       await prisma.matchPlayer.create({
         data: {
           matchId: params.matchId,
@@ -85,10 +100,6 @@ class SimulatedMatchOrchestrator {
     } finally {
       this.scheduledMatches.delete(params.matchId);
     }
-  }
-
-  private randomDelay(minMs: number, maxMs: number): number {
-    return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
   }
 }
 
