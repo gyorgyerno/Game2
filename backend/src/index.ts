@@ -22,6 +22,7 @@ import aiRoutes from './routes/ai';
 import friendRoutes from './routes/friends';
 import gamesRoutes from './routes/games';
 import prisma from './prisma';
+import { activityFeedGenerator } from './services/simulatedPlayers/ActivityFeedGenerator';
 
 const app = express();
 const server = http.createServer(app);
@@ -103,6 +104,8 @@ server.listen(config.port, async () => {
   } catch (err) {
     logger.error('❌ Seed game types esuat', { err });
   }
+
+  activityFeedGenerator.start();
 });
 
 export default app;

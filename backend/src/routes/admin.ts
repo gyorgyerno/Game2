@@ -10,6 +10,7 @@ import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { asyncHandler } from '../middleware/errorHandler';
 import { gameRegistry } from '../games/GameRegistry';
 import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/SimulatedMatchOrchestrator';
+import { activityFeedGenerator } from '../services/simulatedPlayers/ActivityFeedGenerator';
 
 const router = Router();
 
@@ -605,6 +606,41 @@ router.get('/simulated-players/audit-trail', adminAuth, asyncHandler(async (req:
     }));
 
   res.json({ entries });
+}));
+
+// ─── GET /api/admin/simulated-players/activity-feed/status ─────────────────
+router.get('/simulated-players/activity-feed/status', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const botConfig = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });
+
+  const configRequested = {
+    enabled: Boolean(botConfig?.enabled && botConfig?.activityFeedEnabled),
+  };
+
+  const runtimeFlags = {
+    simPlayers: config.features.simPlayersEnabled,
+    activityFeed: config.features.botActivityFeedEnabled,
+  };
+
+  const effectiveEnabled = configRequested.enabled && runtimeFlags.simPlayers && runtimeFlags.activityFeed;
+
+  res.json({
+    configRequested,
+    runtimeFlags,
+    effectiveEnabled,
+    generator: activityFeedGenerator.getStatus(),
+  });
+}));
+
+// ─── GET /api/admin/simulated-players/activity-feed/events ─────────────────
+router.get('/simulated-players/activity-feed/events', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const limit = parseInt((req.query.limit as string) || '20', 10);
+  res.json({ events: activityFeedGenerator.getRecentEvents(limit) });
+}));
+
+// ─── POST /api/admin/simulated-players/activity-feed/generate ──────────────
+router.post('/simulated-players/activity-feed/generate', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const event = await activityFeedGenerator.forceGenerate();
+  res.json({ event });
 }));
 
 // ─── GET /api/admin/games ────────────────────────────────────────────────────

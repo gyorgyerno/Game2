@@ -149,6 +149,39 @@ export type SimulatedPlayersFeatureStatus = {
   };
 };
 
+export type ActivityFeedRuntimeStatus = {
+  configRequested: {
+    enabled: boolean;
+  };
+  runtimeFlags: {
+    simPlayers: boolean;
+    activityFeed: boolean;
+  };
+  effectiveEnabled: boolean;
+  generator: {
+    running: boolean;
+    tickMs: number;
+    minCooldownMs: number;
+    recentEventsCount: number;
+    totalTicks: number;
+    totalGenerated: number;
+    skippedDisabled: number;
+    skippedCooldown: number;
+    skippedNoCandidate: number;
+    lastEmitAt?: string;
+  };
+};
+
+export type ActivityFeedRuntimeEvent = {
+  id: string;
+  type: 'bot_activity';
+  message: string;
+  gameType: string;
+  botUserId: string;
+  botUsername: string;
+  createdAt: string;
+};
+
 export const getSimulatedPlayersConfig = async () => {
   const { data } = await adminApi.get<{ botConfig: BotConfig }>('/api/admin/simulated-players/config');
   return data.botConfig;
@@ -180,6 +213,23 @@ export const listSimulatedPlayersAuditTrail = async (lines = 30) => {
 export const getSimulatedPlayersFeatureStatus = async () => {
   const { data } = await adminApi.get<SimulatedPlayersFeatureStatus>('/api/admin/simulated-players/feature-status');
   return data;
+};
+
+export const getActivityFeedRuntimeStatus = async () => {
+  const { data } = await adminApi.get<ActivityFeedRuntimeStatus>('/api/admin/simulated-players/activity-feed/status');
+  return data;
+};
+
+export const listActivityFeedRuntimeEvents = async (limit = 20) => {
+  const { data } = await adminApi.get<{ events: ActivityFeedRuntimeEvent[] }>('/api/admin/simulated-players/activity-feed/events', {
+    params: { limit },
+  });
+  return data.events;
+};
+
+export const generateActivityFeedRuntimeEvent = async () => {
+  const { data } = await adminApi.post<{ event: ActivityFeedRuntimeEvent | null }>('/api/admin/simulated-players/activity-feed/generate');
+  return data.event;
 };
 
 export const listSimulatedPlayerProfiles = async (params: { page?: number; limit?: number; search?: string }) => {
