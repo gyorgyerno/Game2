@@ -8,6 +8,7 @@
     "start": "node dist/index.js",
     "sim:loadtest": "node scripts/loadtest-simulated-metrics.js",
     "sim:loadtest:nightly": "node scripts/loadtest-simulated-nightly.js",
+    "sim:selfcheck": "node scripts/selfcheck-simulated-runtime.js",
     "sim:reports:cleanup": "node scripts/cleanup-simulated-reports.js",
     "sim:reports:cleanup:dry": "node scripts/cleanup-simulated-reports.js --days 14 --dryRun",
     "db:migrate": "prisma migrate dev",

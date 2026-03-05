@@ -27,4 +27,11 @@ export const config = {
     botChatEnabled: envBool(process.env.BOT_CHAT_ENABLED, false),
     botActivityFeedEnabled: envBool(process.env.BOT_ACTIVITY_FEED_ENABLED, false),
   },
+  simulatedOps: {
+    maxLagForNonCriticalMs: parseInt(process.env.SIM_MAX_LAG_NON_CRITICAL_MS || '120', 10),
+    decisionP95AlertMs: parseInt(process.env.SIM_DECISION_P95_ALERT_MS || '40', 10),
+    eventLoopLagAlertMs: parseInt(process.env.SIM_EVENT_LOOP_LAG_ALERT_MS || '80', 10),
+    generatorCircuitBreakerConsecutiveErrors: parseInt(process.env.SIM_CIRCUIT_BREAKER_ERRORS || '5', 10),
+    generatorCircuitBreakerMs: parseInt(process.env.SIM_CIRCUIT_BREAKER_MS || '120000', 10),
+  },
 };

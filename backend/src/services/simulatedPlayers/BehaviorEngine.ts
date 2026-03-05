@@ -34,10 +34,15 @@ function chance(probability: number): boolean {
 }
 
 class BehaviorEngine {
+  private recentDecisionSignatures: string[] = [];
+
   resolveThinkingDelayMs(profile: BehaviorProfile): number {
     const min = Math.max(250, profile.thinkingSpeedMsMin);
     const max = Math.max(min + 100, profile.thinkingSpeedMsMax);
     let delay = randomInt(min, max);
+    const hour = new Date().getHours();
+    const circadianFactor = hour >= 23 || hour <= 6 ? 1.08 : hour >= 7 && hour <= 9 ? 0.94 : 1;
+    delay = Math.floor(delay * circadianFactor);
 
     switch (profile.personality) {
       case 'FAST_RISKY':
@@ -79,8 +84,8 @@ class BehaviorEngine {
   decideMove(profile: BehaviorProfile): MoveDecision {
     const thinkingDelayMs = this.resolveThinkingDelayMs(profile);
 
-    const willHesitate = chance(profile.hesitationProbability);
-    const hesitationDelayMs = willHesitate ? randomInt(800, 2800) : 0;
+    let willHesitate = chance(profile.hesitationProbability);
+    let hesitationDelayMs = willHesitate ? randomInt(800, 2800) : 0;
 
     const skillAdjustedMistakeRate = clamp(
       profile.mistakeRate - profile.skillLevel * 0.01,
@@ -88,9 +93,29 @@ class BehaviorEngine {
       0.55,
     );
 
-    const willMakeMistake = chance(skillAdjustedMistakeRate);
-    const willCorrect = willMakeMistake && chance(profile.correctionProbability);
-    const correctionDelayMs = willCorrect ? randomInt(2000, 4200) : 0;
+    let willMakeMistake = chance(skillAdjustedMistakeRate);
+    let willCorrect = willMakeMistake && chance(profile.correctionProbability);
+    let correctionDelayMs = willCorrect ? randomInt(2000, 4200) : 0;
+
+    const signature = `${willHesitate}-${willMakeMistake}-${willCorrect}`;
+    const lastTwoSame =
+      this.recentDecisionSignatures.length >= 2 &&
+      this.recentDecisionSignatures[this.recentDecisionSignatures.length - 1] === signature &&
+      this.recentDecisionSignatures[this.recentDecisionSignatures.length - 2] === signature;
+
+    if (lastTwoSame) {
+      if (willMakeMistake) {
+        willMakeMistake = false;
+        willCorrect = false;
+        correctionDelayMs = 0;
+      } else {
+        willHesitate = !willHesitate;
+        hesitationDelayMs = willHesitate ? randomInt(900, 2600) : 0;
+      }
+    }
+
+    this.recentDecisionSignatures.push(`${willHesitate}-${willMakeMistake}-${willCorrect}`);
+    if (this.recentDecisionSignatures.length > 50) this.recentDecisionSignatures.shift();
 
     return {
       thinkingDelayMs,

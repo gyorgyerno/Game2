@@ -284,6 +284,12 @@ function decideNextAction(matchState, aiProfile):
 - activity feed + bot chat
 - tuning anti-detection + load tests
 
+## Status implementare (2026-03-05)
+- Faza 1: completă
+- Faza 2: completă
+- Faza 3: completă (inclusiv load tests + automatizare nightly + cleanup)
+- Rămas post-MVP: integrare error tracking extern agregat (Sentry/Datadog/ELK) și extindere selfcheck în CI
+
 ## KPI de validare
 - lobby wait time ↓
 - retenție D1/D7 ↑

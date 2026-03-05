@@ -105,6 +105,27 @@ Acest fișier păstrează istoricul modificărilor pentru sistemul de simulated 
   - **Impact:** Reduces manual operational steps and standardizes nightly KPI collection.
   - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
 
+### Added
+- **Area:** Admin / Observability
+  - **Summary:** Added aggregated simulated runtime alerts endpoint (`/api/admin/simulated-players/alerts`) with warn/critical signals for lag, decision p95, error counters and circuit breaker state.
+  - **Reason:** Centralize operational visibility and simplify go/no-go checks.
+  - **Impact:** Faster diagnosis and clearer runtime health posture for simulated subsystem.
+  - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
+
+### Changed
+- **Area:** AI Behavior / Runtime
+  - **Summary:** Tuned anti-detection behavior (circadian timing variation + anti-pattern decision repetition guard) and added generator guardrails (backpressure on lag, error aggregation, circuit breaker).
+  - **Reason:** Reduce repetitive bot patterns and improve resilience under degraded runtime conditions.
+  - **Impact:** More human-like behavior and safer non-critical workload throttling.
+  - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
+
+### Added
+- **Area:** Tooling / QA
+  - **Summary:** Added `sim:selfcheck` regression script validating admin login + simulated health + alerts payload contracts.
+  - **Reason:** Provide minimal repeatable anti-regression check without adding heavy test framework.
+  - **Impact:** Faster sanity validation after changes affecting simulated runtime.
+  - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
+
 ---
 
 ## Template Entry (copy/paste)

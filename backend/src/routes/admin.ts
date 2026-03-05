@@ -16,6 +16,17 @@ import { runtimeMetricsMonitor } from '../services/simulatedPlayers/RuntimeMetri
 
 const router = Router();
 
+type SimulatedAlertSeverity = 'warn' | 'critical';
+
+type SimulatedAlert = {
+  code: string;
+  source: 'runtime' | 'activityFeed' | 'botChat';
+  severity: SimulatedAlertSeverity;
+  message: string;
+  value?: number;
+  threshold?: number;
+};
+
 function toCanonicalGameType(gameType: string): string {
   if (gameType === 'maze') return 'labirinturi';
   return gameType;
@@ -102,6 +113,118 @@ router.get('/simulated-players/health', adminAuth, asyncHandler(async (_req: Adm
       botChat: botChatGenerator.getStatus(),
     },
     runtimeMetrics: runtimeMetricsMonitor.getSnapshot(),
+  });
+}));
+
+// ─── GET /api/admin/simulated-players/alerts ────────────────────────────────
+router.get('/simulated-players/alerts', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const runtime = runtimeMetricsMonitor.getSnapshot();
+  const activity = activityFeedGenerator.getStatus();
+  const chat = botChatGenerator.getStatus();
+
+  const alerts: SimulatedAlert[] = [];
+
+  if (runtime.eventLoopLagMs >= config.simulatedOps.eventLoopLagAlertMs) {
+    alerts.push({
+      code: 'runtime_event_loop_lag_high',
+      source: 'runtime',
+      severity: 'warn',
+      message: 'Event loop lag curent peste pragul recomandat.',
+      value: runtime.eventLoopLagMs,
+      threshold: config.simulatedOps.eventLoopLagAlertMs,
+    });
+  }
+
+  if (runtime.maxEventLoopLagMs >= config.simulatedOps.eventLoopLagAlertMs * 2) {
+    alerts.push({
+      code: 'runtime_event_loop_lag_spike',
+      source: 'runtime',
+      severity: 'critical',
+      message: 'Spike major de event loop lag detectat.',
+      value: runtime.maxEventLoopLagMs,
+      threshold: config.simulatedOps.eventLoopLagAlertMs * 2,
+    });
+  }
+
+  if (activity.p95DecisionCpuMs >= config.simulatedOps.decisionP95AlertMs) {
+    alerts.push({
+      code: 'activity_decision_p95_high',
+      source: 'activityFeed',
+      severity: 'warn',
+      message: 'P95 CPU pentru Activity Feed este peste prag.',
+      value: activity.p95DecisionCpuMs,
+      threshold: config.simulatedOps.decisionP95AlertMs,
+    });
+  }
+
+  if (chat.p95DecisionCpuMs >= config.simulatedOps.decisionP95AlertMs) {
+    alerts.push({
+      code: 'chat_decision_p95_high',
+      source: 'botChat',
+      severity: 'warn',
+      message: 'P95 CPU pentru Bot Chat este peste prag.',
+      value: chat.p95DecisionCpuMs,
+      threshold: config.simulatedOps.decisionP95AlertMs,
+    });
+  }
+
+  if (activity.totalErrors > 0) {
+    alerts.push({
+      code: 'activity_errors_detected',
+      source: 'activityFeed',
+      severity: 'warn',
+      message: 'Activity Feed a înregistrat erori la runtime.',
+      value: activity.totalErrors,
+    });
+  }
+
+  if (chat.totalErrors > 0) {
+    alerts.push({
+      code: 'chat_errors_detected',
+      source: 'botChat',
+      severity: 'warn',
+      message: 'Bot Chat a înregistrat erori la runtime.',
+      value: chat.totalErrors,
+    });
+  }
+
+  if (activity.circuitBreakerActive || activity.consecutiveErrors >= config.simulatedOps.generatorCircuitBreakerConsecutiveErrors) {
+    alerts.push({
+      code: 'activity_circuit_breaker_active',
+      source: 'activityFeed',
+      severity: 'critical',
+      message: 'Circuit breaker activ pentru Activity Feed.',
+      value: activity.consecutiveErrors,
+      threshold: config.simulatedOps.generatorCircuitBreakerConsecutiveErrors,
+    });
+  }
+
+  if (chat.circuitBreakerActive || chat.consecutiveErrors >= config.simulatedOps.generatorCircuitBreakerConsecutiveErrors) {
+    alerts.push({
+      code: 'chat_circuit_breaker_active',
+      source: 'botChat',
+      severity: 'critical',
+      message: 'Circuit breaker activ pentru Bot Chat.',
+      value: chat.consecutiveErrors,
+      threshold: config.simulatedOps.generatorCircuitBreakerConsecutiveErrors,
+    });
+  }
+
+  const criticalCount = alerts.filter((alert) => alert.severity === 'critical').length;
+  const warnCount = alerts.filter((alert) => alert.severity === 'warn').length;
+
+  res.json({
+    alerts,
+    summary: {
+      healthy: alerts.length === 0,
+      warnCount,
+      criticalCount,
+    },
+    thresholds: {
+      eventLoopLagAlertMs: config.simulatedOps.eventLoopLagAlertMs,
+      decisionP95AlertMs: config.simulatedOps.decisionP95AlertMs,
+      circuitBreakerConsecutiveErrors: config.simulatedOps.generatorCircuitBreakerConsecutiveErrors,
+    },
   });
 }));
 

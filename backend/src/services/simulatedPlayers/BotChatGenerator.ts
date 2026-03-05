@@ -1,6 +1,7 @@
 import prisma from '../../prisma';
 import logger from '../../logger';
 import { config } from '../../config';
+import { runtimeMetricsMonitor } from './RuntimeMetricsMonitor';
 
 type BotChatMessage = {
   id: string;
@@ -22,6 +23,14 @@ type BotChatStatus = {
   skippedDisabled: number;
   skippedCooldown: number;
   skippedNoCandidate: number;
+  skippedBackpressure: number;
+  skippedCircuitBreaker: number;
+  totalErrors: number;
+  consecutiveErrors: number;
+  circuitBreakerActive: boolean;
+  circuitBreakerUntil?: string;
+  lastErrorAt?: string;
+  lastError?: string;
   lastDecisionCpuMs: number;
   p95DecisionCpuMs: number;
   lastEmitAt?: string;
@@ -39,6 +48,13 @@ class BotChatGenerator {
   private skippedDisabled = 0;
   private skippedCooldown = 0;
   private skippedNoCandidate = 0;
+  private skippedBackpressure = 0;
+  private skippedCircuitBreaker = 0;
+  private totalErrors = 0;
+  private consecutiveErrors = 0;
+  private circuitBreakerUntil?: Date;
+  private lastErrorAt?: Date;
+  private lastError?: string;
   private lastDecisionCpuMs = 0;
   private decisionSamplesMs: number[] = [];
 
@@ -71,6 +87,14 @@ class BotChatGenerator {
       skippedDisabled: this.skippedDisabled,
       skippedCooldown: this.skippedCooldown,
       skippedNoCandidate: this.skippedNoCandidate,
+      skippedBackpressure: this.skippedBackpressure,
+      skippedCircuitBreaker: this.skippedCircuitBreaker,
+      totalErrors: this.totalErrors,
+      consecutiveErrors: this.consecutiveErrors,
+      circuitBreakerActive: Boolean(this.circuitBreakerUntil && this.circuitBreakerUntil.getTime() > Date.now()),
+      circuitBreakerUntil: this.circuitBreakerUntil?.toISOString(),
+      lastErrorAt: this.lastErrorAt?.toISOString(),
+      lastError: this.lastError,
       lastDecisionCpuMs: this.lastDecisionCpuMs,
       p95DecisionCpuMs: this.computeP95(this.decisionSamplesMs),
       lastEmitAt: this.lastEmitAt?.toISOString(),
@@ -90,77 +114,107 @@ class BotChatGenerator {
     const startedAt = Date.now();
     this.totalTicks += 1;
 
-    const botConfig = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });
-    const enabledByConfig = Boolean(botConfig?.enabled && botConfig?.chatEnabled);
-    const enabledByFlags = config.features.simPlayersEnabled && config.features.botChatEnabled;
-
-    if (!enabledByConfig || !enabledByFlags) {
-      this.skippedDisabled += 1;
+    if (!force && this.circuitBreakerUntil && this.circuitBreakerUntil.getTime() > Date.now()) {
+      this.skippedCircuitBreaker += 1;
       this.recordDecisionCpuMs(Date.now() - startedAt);
       return null;
     }
 
-    const now = Date.now();
-    if (!force && this.lastEmitAt && now - this.lastEmitAt.getTime() < this.minCooldownMs) {
-      this.skippedCooldown += 1;
+    const runtime = runtimeMetricsMonitor.getSnapshot();
+    if (!force && runtime.eventLoopLagMs > config.simulatedOps.maxLagForNonCriticalMs) {
+      this.skippedBackpressure += 1;
       this.recordDecisionCpuMs(Date.now() - startedAt);
       return null;
     }
 
-    const candidates = await prisma.aIPlayerProfile.findMany({
-      where: {
-        enabled: true,
-        user: { userType: 'SIMULATED' },
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            username: true,
+    try {
+      const botConfig = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });
+      const enabledByConfig = Boolean(botConfig?.enabled && botConfig?.chatEnabled);
+      const enabledByFlags = config.features.simPlayersEnabled && config.features.botChatEnabled;
+
+      if (!enabledByConfig || !enabledByFlags) {
+        this.skippedDisabled += 1;
+        return null;
+      }
+
+      const now = Date.now();
+      if (!force && this.lastEmitAt && now - this.lastEmitAt.getTime() < this.minCooldownMs) {
+        this.skippedCooldown += 1;
+        return null;
+      }
+
+      const candidates = await prisma.aIPlayerProfile.findMany({
+        where: {
+          enabled: true,
+          user: { userType: 'SIMULATED' },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+            },
           },
         },
-      },
-      take: 25,
-      orderBy: { updatedAt: 'desc' },
-    });
+        take: 25,
+        orderBy: { updatedAt: 'desc' },
+      });
 
-    if (!candidates.length) {
-      this.skippedNoCandidate += 1;
-      this.recordDecisionCpuMs(Date.now() - startedAt);
+      if (!candidates.length) {
+        this.skippedNoCandidate += 1;
+        return null;
+      }
+
+      const profile = candidates[Math.floor(Math.random() * candidates.length)];
+      const preferredGames = this.parsePreferredGames(profile.preferredGames);
+      const gameType = preferredGames[Math.floor(Math.random() * preferredGames.length)] || 'integrame';
+      const text = this.buildMessage(gameType);
+
+      const message: BotChatMessage = {
+        id: `bot-chat-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        type: 'bot_chat',
+        text,
+        gameType,
+        botUserId: profile.user.id,
+        botUsername: profile.user.username,
+        createdAt: new Date().toISOString(),
+      };
+
+      this.lastEmitAt = new Date();
+      this.totalGenerated += 1;
+      this.messages.unshift(message);
+      if (this.messages.length > 100) this.messages.length = 100;
+      this.consecutiveErrors = 0;
+      this.circuitBreakerUntil = undefined;
+
+      logger.info('[BOT_CHAT] Chat message generated', {
+        botUserId: message.botUserId,
+        botUsername: message.botUsername,
+        gameType: message.gameType,
+        messageId: message.id,
+        forced: force,
+      });
+
+      return message;
+    } catch (error) {
+      this.totalErrors += 1;
+      this.consecutiveErrors += 1;
+      this.lastErrorAt = new Date();
+      this.lastError = error instanceof Error ? error.message : String(error);
+
+      if (this.consecutiveErrors >= config.simulatedOps.generatorCircuitBreakerConsecutiveErrors) {
+        this.circuitBreakerUntil = new Date(Date.now() + config.simulatedOps.generatorCircuitBreakerMs);
+      }
+
+      logger.error('[BOT_CHAT] tick failed', {
+        error: this.lastError,
+        consecutiveErrors: this.consecutiveErrors,
+        circuitBreakerUntil: this.circuitBreakerUntil?.toISOString(),
+      });
       return null;
+    } finally {
+      this.recordDecisionCpuMs(Date.now() - startedAt);
     }
-
-    const profile = candidates[Math.floor(Math.random() * candidates.length)];
-    const preferredGames = this.parsePreferredGames(profile.preferredGames);
-    const gameType = preferredGames[Math.floor(Math.random() * preferredGames.length)] || 'integrame';
-    const text = this.buildMessage(gameType);
-
-    const message: BotChatMessage = {
-      id: `bot-chat-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-      type: 'bot_chat',
-      text,
-      gameType,
-      botUserId: profile.user.id,
-      botUsername: profile.user.username,
-      createdAt: new Date().toISOString(),
-    };
-
-    this.lastEmitAt = new Date();
-    this.totalGenerated += 1;
-    this.messages.unshift(message);
-    if (this.messages.length > 100) this.messages.length = 100;
-
-    logger.info('[BOT_CHAT] Chat message generated', {
-      botUserId: message.botUserId,
-      botUsername: message.botUsername,
-      gameType: message.gameType,
-      messageId: message.id,
-      forced: force,
-    });
-
-    this.recordDecisionCpuMs(Date.now() - startedAt);
-
-    return message;
   }
 
   private recordDecisionCpuMs(value: number): void {

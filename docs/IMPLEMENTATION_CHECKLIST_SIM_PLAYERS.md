@@ -81,10 +81,12 @@
 - [x] logging decizii matchmaking
 - [x] metrics latență acțiuni bot (p95/event-loop/queue depth)
 - [x] runbook operațional load test (comenzi + praguri + troubleshooting)
-- [ ] error tracking pe module AI/Ghost (agregat + alerting)
+- [x] alerting agregat runtime (admin endpoint + circuit breaker status + error counters)
+- [ ] error tracking extern pe module AI/Ghost (agregator centralizat)
 
 ## Definition of Done (MVP)
 - [x] Faza 1 completă fără regresii
 - [x] flags funcționale
 - [x] documentație actualizată
 - [x] changelog completat
+- [x] selfcheck minim anti-regresie (`sim:selfcheck`)
