@@ -18,6 +18,10 @@ function toCanonicalGameType(gameType: string): string {
   return gameType;
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 // ─── POST /api/admin/login ────────────────────────────────────────────────────
 router.post('/login', asyncHandler(async (req: Request, res: Response) => {
   const { username, password } = req.body as { username: string; password: string };
@@ -177,6 +181,207 @@ router.patch('/simulated-players/config', adminAuth, asyncHandler(async (req: Ad
   });
 
   res.json({ botConfig: updated });
+}));
+
+// ─── GET /api/admin/simulated-players/profiles ──────────────────────────────
+router.get('/simulated-players/profiles', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const page = parseInt((req.query.page as string) || '1', 10);
+  const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '20', 10)));
+  const search = ((req.query.search as string) || '').trim();
+  const skip = (Math.max(1, page) - 1) * limit;
+
+  const where = search
+    ? {
+        user: {
+          OR: [
+            { username: { contains: search } },
+            { email: { contains: search } },
+          ],
+        },
+      }
+    : {};
+
+  const [profiles, total] = await Promise.all([
+    prisma.aIPlayerProfile.findMany({
+      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            avatarUrl: true,
+            userType: true,
+            rating: true,
+            xp: true,
+            league: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.aIPlayerProfile.count({ where }),
+  ]);
+
+  res.json({
+    profiles,
+    page: Math.max(1, page),
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+  });
+}));
+
+// ─── POST /api/admin/simulated-players/profiles ─────────────────────────────
+router.post('/simulated-players/profiles', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const {
+    username,
+    email,
+    avatarUrl,
+    skillLevel,
+    personality,
+    preferredGames,
+    enabled,
+  } = req.body as {
+    username?: string;
+    email?: string;
+    avatarUrl?: string;
+    skillLevel?: number;
+    personality?: string;
+    preferredGames?: string[];
+    enabled?: boolean;
+  };
+
+  if (!username || username.trim().length < 3) {
+    res.status(400).json({ error: 'username este obligatoriu (minim 3 caractere)' });
+    return;
+  }
+
+  if (email !== undefined && (!email.includes('@') || email.length < 6)) {
+    res.status(400).json({ error: 'email invalid' });
+    return;
+  }
+
+  const normalizedUsername = username.trim();
+  const normalizedEmail = (email && email.trim()) || `sim.${normalizedUsername.toLowerCase()}.${Date.now()}@integrame.local`;
+  const normalizedSkill = clampNumber(Number.isFinite(skillLevel as number) ? Number(skillLevel) : 5, 1, 10);
+  const normalizedPreferredGames = Array.isArray(preferredGames) ? preferredGames.filter((g) => typeof g === 'string').slice(0, 12) : [];
+
+  const created = await prisma.user.create({
+    data: {
+      username: normalizedUsername,
+      email: normalizedEmail,
+      avatarUrl: avatarUrl || null,
+      userType: 'SIMULATED',
+      rating: 1000,
+      xp: 0,
+      league: 'bronze',
+      aiProfile: {
+        create: {
+          skillLevel: normalizedSkill,
+          thinkingSpeedMsMin: Math.max(1200, 4600 - normalizedSkill * 320),
+          thinkingSpeedMsMax: Math.max(2600, 7600 - normalizedSkill * 420),
+          mistakeRate: Math.max(0.06, 0.24 - normalizedSkill * 0.02),
+          hesitationProbability: Math.max(0.08, 0.28 - normalizedSkill * 0.02),
+          correctionProbability: Math.min(0.6, 0.22 + normalizedSkill * 0.03),
+          playStyle: (personality || 'CASUAL_PLAYER').toLowerCase(),
+          personality: personality || 'CASUAL_PLAYER',
+          preferredGames: JSON.stringify(normalizedPreferredGames),
+          onlineProbability: 0.35,
+          chatProbability: 0.06,
+          sessionLengthMin: 8,
+          sessionLengthMax: 25,
+          activityPattern: JSON.stringify({ activeHours: [10, 11, 12, 18, 19, 20], timezone: 'Europe/Bucharest' }),
+          enabled: enabled ?? true,
+        },
+      },
+    },
+    include: { aiProfile: true },
+  });
+
+  logger.info('[ADMIN] Simulated profile created', {
+    admin: req.adminUsername,
+    userId: created.id,
+    username: created.username,
+  });
+
+  res.status(201).json({ profile: created });
+}));
+
+// ─── PATCH /api/admin/simulated-players/profiles/:userId ────────────────────
+router.patch('/simulated-players/profiles/:userId', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const userId = req.params.userId;
+  const {
+    username,
+    avatarUrl,
+    skillLevel,
+    thinkingSpeedMsMin,
+    thinkingSpeedMsMax,
+    mistakeRate,
+    hesitationProbability,
+    correctionProbability,
+    personality,
+    preferredGames,
+    enabled,
+  } = req.body as {
+    username?: string;
+    avatarUrl?: string | null;
+    skillLevel?: number;
+    thinkingSpeedMsMin?: number;
+    thinkingSpeedMsMax?: number;
+    mistakeRate?: number;
+    hesitationProbability?: number;
+    correctionProbability?: number;
+    personality?: string;
+    preferredGames?: string[];
+    enabled?: boolean;
+  };
+
+  const existing = await prisma.aIPlayerProfile.findUnique({ where: { userId } });
+  if (!existing) {
+    res.status(404).json({ error: 'AI profile inexistent' });
+    return;
+  }
+
+  if (username !== undefined && username.trim().length < 3) {
+    res.status(400).json({ error: 'username invalid (minim 3 caractere)' });
+    return;
+  }
+
+  const profileUpdate = {
+    ...(skillLevel !== undefined ? { skillLevel: clampNumber(skillLevel, 1, 10) } : {}),
+    ...(thinkingSpeedMsMin !== undefined ? { thinkingSpeedMsMin: clampNumber(thinkingSpeedMsMin, 250, 20000) } : {}),
+    ...(thinkingSpeedMsMax !== undefined ? { thinkingSpeedMsMax: clampNumber(thinkingSpeedMsMax, 300, 25000) } : {}),
+    ...(mistakeRate !== undefined ? { mistakeRate: clampNumber(mistakeRate, 0, 1) } : {}),
+    ...(hesitationProbability !== undefined ? { hesitationProbability: clampNumber(hesitationProbability, 0, 1) } : {}),
+    ...(correctionProbability !== undefined ? { correctionProbability: clampNumber(correctionProbability, 0, 1) } : {}),
+    ...(personality !== undefined ? { personality, playStyle: personality.toLowerCase() } : {}),
+    ...(preferredGames !== undefined ? { preferredGames: JSON.stringify(preferredGames.filter((g) => typeof g === 'string').slice(0, 12)) } : {}),
+    ...(enabled !== undefined ? { enabled: Boolean(enabled) } : {}),
+  };
+
+  const [updatedUser, updatedProfile] = await Promise.all([
+    prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(username !== undefined ? { username: username.trim() } : {}),
+        ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+      },
+    }),
+    prisma.aIPlayerProfile.update({
+      where: { userId },
+      data: profileUpdate,
+    }),
+  ]);
+
+  logger.info('[ADMIN] Simulated profile updated', {
+    admin: req.adminUsername,
+    userId,
+  });
+
+  res.json({ user: updatedUser, profile: updatedProfile });
 }));
 
 // ─── GET /api/admin/games ────────────────────────────────────────────────────
