@@ -57,6 +57,13 @@ Acest fișier păstrează istoricul modificărilor pentru sistemul de simulated 
   - **Flags:** `SIM_PLAYERS_ENABLED`
 
 ### Added
+- **Area:** Observability / Tooling
+  - **Summary:** Added runtime metrics monitor (`eventLoopLagMs`, `eventLoopLagP95Ms`, `p95DecisionCpuMs`) and a load-test reporting script for simulated subsystem health sampling.
+  - **Reason:** Enable measurable validation for stability/performance hardening and safe rollout decisions.
+  - **Impact:** Faster diagnosis under load and repeatable KPI checks with JSON/MD reports.
+  - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
+
+### Added
 - **Area:** Docs
   - **Summary:** Created initial documentation set for simulated players system.
   - **Reason:** Establish a single source of truth before implementation.
