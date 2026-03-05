@@ -50,19 +50,20 @@ Prioritate matchmaking:
 
 ## Status implementare
 ### Faza 1 (Core)
-- [ ] Migrații DB aditive
-- [ ] Seed AI users/profiles
-- [ ] Matchmaking fill slots cu AI
-- [ ] Behavior engine MVP
+- [x] Migrații DB aditive
+- [x] Seed AI users/profiles
+- [x] Matchmaking fill slots cu AI
+- [x] Behavior engine MVP
 
 ### Faza 2
-- [ ] Ghost capture/replay
-- [ ] Skill profiling + adaptation
-- [ ] Stabilizare performanță
+- [x] Ghost capture/replay
+- [x] Skill profiling + adaptation
+- [x] Stabilizare performanță
 
 ### Faza 3
-- [ ] Admin panel complet
-- [ ] Activity feed + bot chat
+- [x] Admin panel complet (config, CRUD AI profiles, GhostRun management)
+- [x] Observability admin (health, audit trail, effective toggles)
+- [ ] Activity feed + bot chat (runtime behavior implementation)
 - [ ] Tuning anti-detection + load tests
 
 ## Fișiere țintă în repo
@@ -89,8 +90,11 @@ Prioritate matchmaking:
 ### 2026-03-05
 - creat document master pentru Simulated Players System
 - definit scope, principii, faze și fișiere țintă
+- implementate Faza 1 și Faza 2 end-to-end
+- implementată majoritatea Fazei 3 pe Admin API/UI + observability
 
 ## Următorii pași
-1. Adăugare modele DB (aditiv)
-2. Introducere feature flags
-3. MVP matchmaking fill cu simulated players (OFF by default)
+1. Implementare runtime pentru activity feed bots
+2. Implementare runtime pentru bot chat cu cooldown/context
+3. Enforcement complet `botScoreLimit` în leaderboard
+4. Load tests + tuning anti-detection final
