@@ -1,6 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+function envBool(value: string | undefined, defaultValue = false): boolean {
+  if (value == null) return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '4000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -14,5 +20,11 @@ export const config = {
     user: process.env.SMTP_USER || '',
     pass: process.env.SMTP_PASS || '',
     from: process.env.SMTP_FROM || 'Integrame <noreply@integrame.ro>',
+  },
+  features: {
+    simPlayersEnabled: envBool(process.env.SIM_PLAYERS_ENABLED, false),
+    ghostPlayersEnabled: envBool(process.env.GHOST_PLAYERS_ENABLED, false),
+    botChatEnabled: envBool(process.env.BOT_CHAT_ENABLED, false),
+    botActivityFeedEnabled: envBool(process.env.BOT_ACTIVITY_FEED_ENABLED, false),
   },
 };
