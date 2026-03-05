@@ -97,6 +97,62 @@ router.get('/simulated-players/health', adminAuth, asyncHandler(async (_req: Adm
   });
 }));
 
+// ─── GET /api/admin/simulated-players/feature-status ───────────────────────
+router.get('/simulated-players/feature-status', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const botConfig = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });
+
+  const configRequested = {
+    simPlayers: botConfig?.enabled ?? false,
+    chat: botConfig?.chatEnabled ?? false,
+    activityFeed: botConfig?.activityFeedEnabled ?? false,
+  };
+
+  const runtimeFlags = {
+    simPlayers: config.features.simPlayersEnabled,
+    ghostPlayers: config.features.ghostPlayersEnabled,
+    chat: config.features.botChatEnabled,
+    activityFeed: config.features.botActivityFeedEnabled,
+  };
+
+  const effective = {
+    simPlayers: configRequested.simPlayers && runtimeFlags.simPlayers,
+    chat: configRequested.simPlayers && configRequested.chat && runtimeFlags.simPlayers && runtimeFlags.chat,
+    activityFeed: configRequested.simPlayers && configRequested.activityFeed && runtimeFlags.simPlayers && runtimeFlags.activityFeed,
+  };
+
+  const blockers = {
+    simPlayers: effective.simPlayers
+      ? []
+      : [
+          ...(configRequested.simPlayers ? [] : ['db_config_disabled']),
+          ...(runtimeFlags.simPlayers ? [] : ['feature_flag_sim_players_disabled']),
+        ],
+    chat: effective.chat
+      ? []
+      : [
+          ...(configRequested.simPlayers ? [] : ['db_config_sim_players_disabled']),
+          ...(configRequested.chat ? [] : ['db_config_chat_disabled']),
+          ...(runtimeFlags.simPlayers ? [] : ['feature_flag_sim_players_disabled']),
+          ...(runtimeFlags.chat ? [] : ['feature_flag_chat_disabled']),
+        ],
+    activityFeed: effective.activityFeed
+      ? []
+      : [
+          ...(configRequested.simPlayers ? [] : ['db_config_sim_players_disabled']),
+          ...(configRequested.activityFeed ? [] : ['db_config_activity_feed_disabled']),
+          ...(runtimeFlags.simPlayers ? [] : ['feature_flag_sim_players_disabled']),
+          ...(runtimeFlags.activityFeed ? [] : ['feature_flag_activity_feed_disabled']),
+        ],
+  };
+
+  res.json({
+    configRequested,
+    runtimeFlags,
+    effective,
+    blockers,
+  });
+}));
+
 // ─── GET /api/admin/simulated-players/config ────────────────────────────────
 router.get('/simulated-players/config', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
   const botConfig = await prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } });

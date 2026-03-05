@@ -5,6 +5,7 @@ import {
   AIProfileRecord,
   BotConfig,
   createSimulatedPlayerProfile,
+  getSimulatedPlayersFeatureStatus,
   listSimulatedPlayersAuditTrail,
   getSimulatedPlayersConfig,
   getSimulatedPlayersHealth,
@@ -12,6 +13,7 @@ import {
   patchSimulatedPlayerProfile,
   patchSimulatedPlayersConfig,
   SimulatedPlayersAuditEntry,
+  SimulatedPlayersFeatureStatus,
   SimulatedPlayersHealth,
 } from '@/lib/adminApi';
 
@@ -66,6 +68,7 @@ export default function AdminSimulatedPlayersPage() {
   const [configDraft, setConfigDraft] = useState<ConfigDraft | null>(null);
   const [profiles, setProfiles] = useState<AIProfileRecord[]>([]);
   const [health, setHealth] = useState<SimulatedPlayersHealth | null>(null);
+  const [featureStatus, setFeatureStatus] = useState<SimulatedPlayersFeatureStatus | null>(null);
   const [auditEntries, setAuditEntries] = useState<SimulatedPlayersAuditEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -73,6 +76,7 @@ export default function AdminSimulatedPlayersPage() {
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [refreshingHealth, setRefreshingHealth] = useState(false);
+  const [refreshingFeatureStatus, setRefreshingFeatureStatus] = useState(false);
   const [refreshingAudit, setRefreshingAudit] = useState(false);
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -142,6 +146,11 @@ export default function AdminSimulatedPlayersPage() {
     setHealth(data);
   };
 
+  const loadFeatureStatus = async () => {
+    const data = await getSimulatedPlayersFeatureStatus();
+    setFeatureStatus(data);
+  };
+
   const loadAuditTrail = async () => {
     const entries = await listSimulatedPlayersAuditTrail(30);
     setAuditEntries(entries);
@@ -151,7 +160,7 @@ export default function AdminSimulatedPlayersPage() {
     setLoading(true);
     setError('');
     try {
-      await Promise.all([loadConfig(), loadProfiles(targetPage, targetSearch), loadHealth(), loadAuditTrail()]);
+      await Promise.all([loadConfig(), loadProfiles(targetPage, targetSearch), loadHealth(), loadFeatureStatus(), loadAuditTrail()]);
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Nu s-au putut încărca datele pentru simulated players');
     } finally {
@@ -250,6 +259,19 @@ export default function AdminSimulatedPlayersPage() {
       setError(e?.response?.data?.error || 'Nu s-a putut încărca health');
     } finally {
       setRefreshingHealth(false);
+    }
+  };
+
+  const refreshFeatureStatus = async () => {
+    setRefreshingFeatureStatus(true);
+    setError('');
+    try {
+      await loadFeatureStatus();
+      toast('Feature status refresh făcut');
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Nu s-a putut încărca feature status');
+    } finally {
+      setRefreshingFeatureStatus(false);
     }
   };
 
@@ -442,6 +464,63 @@ export default function AdminSimulatedPlayersPage() {
                   </div>
                 )}
               </>
+            )}
+          </section>
+
+          <section style={{
+            background: '#1a1d27', border: '1px solid #2d3748',
+            borderRadius: 12, padding: 20, marginBottom: 24,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ color: '#e2e8f0', fontSize: 18, fontWeight: 600 }}>
+                Effective toggles (requested vs runtime)
+              </h2>
+              <button
+                onClick={refreshFeatureStatus}
+                disabled={refreshingFeatureStatus}
+                style={{
+                  padding: '8px 12px', background: refreshingFeatureStatus ? '#374151' : '#334155', color: '#fff',
+                  border: 'none', borderRadius: 8, cursor: refreshingFeatureStatus ? 'not-allowed' : 'pointer', fontSize: 13,
+                }}
+              >
+                {refreshingFeatureStatus ? 'Refresh...' : 'Refresh status'}
+              </button>
+            </div>
+
+            {!featureStatus ? (
+              <p style={{ color: '#64748b' }}>Feature status indisponibil.</p>
+            ) : (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {([
+                  { key: 'simPlayers', label: 'Simulated players' },
+                  { key: 'chat', label: 'Bot chat' },
+                  { key: 'activityFeed', label: 'Activity feed' },
+                ] as Array<{ key: keyof SimulatedPlayersFeatureStatus['effective']; label: string }>).map((item) => {
+                  const requested = featureStatus.configRequested[item.key];
+                  const runtime = featureStatus.runtimeFlags[item.key];
+                  const effective = featureStatus.effective[item.key];
+                  const blockers = featureStatus.blockers[item.key];
+
+                  return (
+                    <div key={item.key} style={{
+                      background: '#0f1117', border: '1px solid #2d3748', borderRadius: 8,
+                      padding: '10px 12px',
+                    }}>
+                      <div style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                        {item.label}
+                      </div>
+                      <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>
+                        requested(DB): {requested ? 'ON' : 'OFF'} • runtime(flag): {runtime ? 'ON' : 'OFF'} • effective: {effective ? 'ON' : 'OFF'}
+                      </div>
+                      {!effective && blockers.length > 0 && (
+                        <div style={{ color: '#fbbf24', fontSize: 12 }}>
+                          blockers: {blockers.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </section>
 

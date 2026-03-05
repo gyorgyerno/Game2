@@ -125,6 +125,30 @@ export type SimulatedPlayersAuditEntry = {
   olderThanDays: number | null;
 };
 
+export type SimulatedPlayersFeatureStatus = {
+  configRequested: {
+    simPlayers: boolean;
+    chat: boolean;
+    activityFeed: boolean;
+  };
+  runtimeFlags: {
+    simPlayers: boolean;
+    ghostPlayers: boolean;
+    chat: boolean;
+    activityFeed: boolean;
+  };
+  effective: {
+    simPlayers: boolean;
+    chat: boolean;
+    activityFeed: boolean;
+  };
+  blockers: {
+    simPlayers: string[];
+    chat: string[];
+    activityFeed: string[];
+  };
+};
+
 export const getSimulatedPlayersConfig = async () => {
   const { data } = await adminApi.get<{ botConfig: BotConfig }>('/api/admin/simulated-players/config');
   return data.botConfig;
@@ -151,6 +175,11 @@ export const listSimulatedPlayersAuditTrail = async (lines = 30) => {
     params: { lines },
   });
   return data.entries;
+};
+
+export const getSimulatedPlayersFeatureStatus = async () => {
+  const { data } = await adminApi.get<SimulatedPlayersFeatureStatus>('/api/admin/simulated-players/feature-status');
+  return data;
 };
 
 export const listSimulatedPlayerProfiles = async (params: { page?: number; limit?: number; search?: string }) => {
