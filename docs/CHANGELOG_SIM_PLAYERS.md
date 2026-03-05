@@ -43,6 +43,20 @@ Acest fișier păstrează istoricul modificărilor pentru sistemul de simulated 
   - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
 
 ### Added
+- **Area:** AI Behavior / Admin
+  - **Summary:** Added runtime generators for activity feed and bot chat with cooldown, config + feature-flag gating, plus admin status/events/test-generate endpoints and UI panels.
+  - **Reason:** Enable controlled social simulation behavior without heavy compute or continuous spam.
+  - **Impact:** Improves perceived platform activity while keeping rollout safe and observable.
+  - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
+
+### Changed
+- **Area:** Leaderboard
+  - **Summary:** Enforced `botScoreLimit` in leaderboard responses (global and per-game) for `SIMULATED`/`GHOST` accounts.
+  - **Reason:** Prevent simulated accounts from dominating competitive ranking surfaces.
+  - **Impact:** Better fairness perception and stronger player trust in rankings.
+  - **Flags:** `SIM_PLAYERS_ENABLED`
+
+### Added
 - **Area:** Docs
   - **Summary:** Created initial documentation set for simulated players system.
   - **Reason:** Establish a single source of truth before implementation.

@@ -63,7 +63,8 @@ Prioritate matchmaking:
 ### Faza 3
 - [x] Admin panel complet (config, CRUD AI profiles, GhostRun management)
 - [x] Observability admin (health, audit trail, effective toggles)
-- [ ] Activity feed + bot chat (runtime behavior implementation)
+- [x] Activity feed + bot chat (runtime behavior implementation)
+- [x] Enforcement `botScoreLimit` în leaderboard
 - [ ] Tuning anti-detection + load tests
 
 ## Fișiere țintă în repo
@@ -92,9 +93,10 @@ Prioritate matchmaking:
 - definit scope, principii, faze și fișiere țintă
 - implementate Faza 1 și Faza 2 end-to-end
 - implementată majoritatea Fazei 3 pe Admin API/UI + observability
+- implementate runtime activity feed + bot chat cu guardrails
+- aplicat enforcement `botScoreLimit` în leaderboard
 
 ## Următorii pași
-1. Implementare runtime pentru activity feed bots
-2. Implementare runtime pentru bot chat cu cooldown/context
-3. Enforcement complet `botScoreLimit` în leaderboard
-4. Load tests + tuning anti-detection final
+1. Load tests pentru scheduler/feed/chat (stability + latency)
+2. Tuning anti-detection final (variație mesaje/timing/context)
+3. Observability extinsă (metrics p95/eventLoopLag/queue depth + alerte)

@@ -73,9 +73,9 @@
 - [x] health + audit trail + effective toggles status
 
 ### Feed / Chat / Leaderboard
-- [ ] activity feed low-frequency (runtime feature logic)
-- [ ] bot chat rar + cooldown (runtime feature logic)
-- [ ] `botScoreLimit` aplicat în leaderboard (enforcement complet)
+- [x] activity feed low-frequency (runtime feature logic)
+- [x] bot chat rar + cooldown (runtime feature logic)
+- [x] `botScoreLimit` aplicat în leaderboard (enforcement complet)
 
 ## Observability
 - [x] logging decizii matchmaking
