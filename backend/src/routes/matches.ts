@@ -5,6 +5,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import prisma from '../prisma';
 import logger from '../logger';
 import { MAX_PLAYERS_PER_LEVEL, GameLevel } from '@integrame/shared';
+import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/SimulatedMatchOrchestrator';
 
 const router = Router();
 
@@ -43,6 +44,7 @@ router.post('/find-or-create', requireAuth, async (req: AuthRequest & import('ex
       data: { matchId: existing.id, userId: req.userId!, score: 0, xpGained: 0, eloChange: 0 },
     });
     const updated = await prisma.match.findUnique({ where: { id: existing.id }, include: { players: { include: { user: true } } } });
+    simulatedMatchOrchestrator.scheduleFill({ matchId: existing.id, maxPlayers });
     logger.info(`[find-or-create] JOIN existing match=${existing.id} user=${req.userId} players=${updated?.players.length}`);
     return res.json(updated);
   }
@@ -61,6 +63,7 @@ router.post('/find-or-create', requireAuth, async (req: AuthRequest & import('ex
     },
     include: { players: { include: { user: true } } },
   });
+  simulatedMatchOrchestrator.scheduleFill({ matchId: match.id, maxPlayers });
   logger.info(`[find-or-create] CREATE new match=${match.id} user=${req.userId} isAI=${isAI}`);
   return res.status(201).json(match);
 });
@@ -90,6 +93,7 @@ router.post('/:id/join', requireAuth, async (req: AuthRequest & import('express'
     where: { id: matchId },
     include: { players: { include: { user: true } } },
   });
+  simulatedMatchOrchestrator.scheduleFill({ matchId, maxPlayers });
   logger.info(`[join-direct] user=${req.userId} joined match=${matchId} players=${updated?.players.length}`);
   return res.json(updated);
 });
