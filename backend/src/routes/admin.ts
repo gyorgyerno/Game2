@@ -9,6 +9,7 @@ import { config } from '../config';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { asyncHandler } from '../middleware/errorHandler';
 import { gameRegistry } from '../games/GameRegistry';
+import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/SimulatedMatchOrchestrator';
 
 const router = Router();
 
@@ -55,6 +56,41 @@ router.get('/stats', adminAuth, asyncHandler(async (_req: AdminRequest, res: Res
     }),
   ]);
   res.json({ totalUsers, totalMatches, activeMatches, totalInvites, recentUsers });
+}));
+
+// ─── GET /api/admin/simulated-players/health ─────────────────────────────────
+router.get('/simulated-players/health', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const [
+    simulatedUsers,
+    enabledProfiles,
+    waitingMatchesWithBots,
+    botConfig,
+  ] = await Promise.all([
+    prisma.user.count({ where: { userType: 'SIMULATED' } }),
+    prisma.aIPlayerProfile.count({ where: { enabled: true } }),
+    prisma.match.count({
+      where: {
+        status: 'waiting',
+        players: {
+          some: {
+            user: { userType: 'SIMULATED' },
+          },
+        },
+      },
+    }),
+    prisma.botConfig.findFirst({ orderBy: { createdAt: 'asc' } }),
+  ]);
+
+  res.json({
+    features: config.features,
+    botConfig,
+    counters: {
+      simulatedUsers,
+      enabledProfiles,
+      waitingMatchesWithBots,
+    },
+    orchestrator: simulatedMatchOrchestrator.getHealthSnapshot(),
+  });
 }));
 
 // ─── GET /api/admin/games ────────────────────────────────────────────────────
