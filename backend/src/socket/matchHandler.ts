@@ -8,6 +8,7 @@ import {
   ratingToLeague,
 } from '@integrame/shared';
 import { gameRegistry } from '../games/GameRegistry';
+import { config } from '../config';
 
 const countdownTimers: Record<string, ReturnType<typeof setInterval>> = {};
 const matchTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -16,9 +17,11 @@ const countdownStarted: Set<string> = new Set();
 // Tracker socket.id → matchId (pentru detectare disconnect)
 const socketMatchMap: Map<string, string> = new Map();
 const progressRateState: Map<string, { windowStart: number; count: number }> = new Map();
+const ghostEventBuffers: Map<string, Array<{ action: string; time: number; score?: number; correctAnswers?: number; mistakes?: number }>> = new Map();
 
 const PROGRESS_RATE_WINDOW_MS = 1000;
 const PROGRESS_RATE_MAX_PER_WINDOW = 10;
+const MAX_GHOST_EVENTS_PER_PLAYER = 300;
 
 type LegacyProgressPayload = {
   matchId: string;
@@ -173,6 +176,91 @@ function isProgressRateLimited(socketId: string): boolean {
   return false;
 }
 
+function ghostBufferKey(matchId: string, userId: string): string {
+  return `${matchId}:${userId}`;
+}
+
+function pushGhostEvent(
+  matchId: string,
+  userId: string,
+  action: string,
+  startedAt: Date | null,
+  payload?: { score?: number; correctAnswers?: number; mistakes?: number },
+) {
+  if (!config.features.ghostPlayersEnabled) return;
+
+  const key = ghostBufferKey(matchId, userId);
+  const now = Date.now();
+  const relativeSec = startedAt
+    ? Number(((now - startedAt.getTime()) / 1000).toFixed(2))
+    : 0;
+
+  const current = ghostEventBuffers.get(key) ?? [];
+  current.push({
+    action,
+    time: Math.max(0, relativeSec),
+    score: payload?.score,
+    correctAnswers: payload?.correctAnswers,
+    mistakes: payload?.mistakes,
+  });
+
+  if (current.length > MAX_GHOST_EVENTS_PER_PLAYER) {
+    current.splice(0, current.length - MAX_GHOST_EVENTS_PER_PLAYER);
+  }
+
+  ghostEventBuffers.set(key, current);
+}
+
+function clearGhostBuffersForMatch(matchId: string, userIds: string[]) {
+  for (const id of userIds) {
+    ghostEventBuffers.delete(ghostBufferKey(matchId, id));
+  }
+}
+
+async function captureGhostRuns(match: any): Promise<void> {
+  if (!config.features.ghostPlayersEnabled) return;
+  if (!match) return;
+
+  const startedMs = match.startedAt ? new Date(match.startedAt).getTime() : Date.now();
+
+  for (const player of match.players as Array<any>) {
+    if (player.user?.userType !== 'REAL') continue;
+
+    const key = ghostBufferKey(match.id, player.userId);
+    const buffered = ghostEventBuffers.get(key) ?? [];
+
+    const events = buffered.length > 0
+      ? buffered
+      : [{ action: 'finish', time: 0, score: player.score, correctAnswers: player.correctAnswers, mistakes: player.mistakes }];
+
+    const completionTimeSec = player.finishedAt
+      ? Math.max(0, Number(((new Date(player.finishedAt).getTime() - startedMs) / 1000).toFixed(2)))
+      : 0;
+
+    await prisma.ghostRun.create({
+      data: {
+        playerId: player.userId,
+        gameType: match.gameType,
+        difficulty: match.level,
+        moves: JSON.stringify(events.map((event) => ({
+          action: event.action,
+          time: event.time,
+          score: event.score,
+          correctAnswers: event.correctAnswers,
+          mistakes: event.mistakes,
+        }))),
+        timestamps: JSON.stringify(events.map((event) => event.time)),
+        mistakes: player.mistakes ?? 0,
+        corrections: 0,
+        completionTime: completionTimeSec,
+        finalScore: player.score ?? 0,
+      },
+    });
+  }
+
+  clearGhostBuffersForMatch(match.id, match.players.map((p: any) => p.userId));
+}
+
 export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: string) {
   // ─── Join Match ─────────────────────────────────────────────────────────────
   socket.on(SOCKET_EVENTS.JOIN_MATCH, async ({ matchId }: { matchId: string }) => {
@@ -292,6 +380,12 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
 
         const liveScore = gameRegistry.calculateLiveScore(match.gameType, correctAnswers, mistakes);
 
+        pushGhostEvent(matchId, userId, 'progress', match.startedAt, {
+          score: liveScore,
+          correctAnswers,
+          mistakes,
+        });
+
         await prisma.matchPlayer.updateMany({
           where: { matchId, userId },
           data: { score: liveScore, correctAnswers, mistakes },
@@ -347,6 +441,12 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
         const isFirst = finishedPlayers.length === 0;
 
         const finalScore = gameRegistry.calculateFinalScore(match.gameType, correctAnswers, mistakes, isFirst);
+
+        pushGhostEvent(matchId, userId, 'finish', match.startedAt, {
+          score: finalScore,
+          correctAnswers,
+          mistakes,
+        });
 
         await prisma.matchPlayer.updateMany({
           where: { matchId, userId },
@@ -591,6 +691,8 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string, fo
       where: { id: matchId },
       include: { players: { include: { user: true } } },
     });
+
+    await captureGhostRuns(final);
 
     io.to(room).emit(SOCKET_EVENTS.MATCH_FINISHED, final);
   } catch (err) {
