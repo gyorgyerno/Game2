@@ -111,6 +111,20 @@ export type SimulatedPlayersHealth = {
   };
 };
 
+export type SimulatedPlayersAuditEntry = {
+  timestamp: string | null;
+  level: string | null;
+  message: string;
+  admin: string | null;
+  userId: string | null;
+  username: string | null;
+  botConfigId: string | null;
+  ghostRunId: string | null;
+  deletedCount: number | null;
+  gameType: string | null;
+  olderThanDays: number | null;
+};
+
 export const getSimulatedPlayersConfig = async () => {
   const { data } = await adminApi.get<{ botConfig: BotConfig }>('/api/admin/simulated-players/config');
   return data.botConfig;
@@ -130,6 +144,13 @@ export const patchSimulatedPlayersConfig = async (payload: Partial<{
 export const getSimulatedPlayersHealth = async () => {
   const { data } = await adminApi.get<SimulatedPlayersHealth>('/api/admin/simulated-players/health');
   return data;
+};
+
+export const listSimulatedPlayersAuditTrail = async (lines = 30) => {
+  const { data } = await adminApi.get<{ entries: SimulatedPlayersAuditEntry[] }>('/api/admin/simulated-players/audit-trail', {
+    params: { lines },
+  });
+  return data.entries;
 };
 
 export const listSimulatedPlayerProfiles = async (params: { page?: number; limit?: number; search?: string }) => {

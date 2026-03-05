@@ -5,11 +5,13 @@ import {
   AIProfileRecord,
   BotConfig,
   createSimulatedPlayerProfile,
+  listSimulatedPlayersAuditTrail,
   getSimulatedPlayersConfig,
   getSimulatedPlayersHealth,
   listSimulatedPlayerProfiles,
   patchSimulatedPlayerProfile,
   patchSimulatedPlayersConfig,
+  SimulatedPlayersAuditEntry,
   SimulatedPlayersHealth,
 } from '@/lib/adminApi';
 
@@ -64,12 +66,14 @@ export default function AdminSimulatedPlayersPage() {
   const [configDraft, setConfigDraft] = useState<ConfigDraft | null>(null);
   const [profiles, setProfiles] = useState<AIProfileRecord[]>([]);
   const [health, setHealth] = useState<SimulatedPlayersHealth | null>(null);
+  const [auditEntries, setAuditEntries] = useState<SimulatedPlayersAuditEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
   const [refreshingHealth, setRefreshingHealth] = useState(false);
+  const [refreshingAudit, setRefreshingAudit] = useState(false);
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -138,11 +142,16 @@ export default function AdminSimulatedPlayersPage() {
     setHealth(data);
   };
 
+  const loadAuditTrail = async () => {
+    const entries = await listSimulatedPlayersAuditTrail(30);
+    setAuditEntries(entries);
+  };
+
   const loadAll = async (targetPage = page, targetSearch = search) => {
     setLoading(true);
     setError('');
     try {
-      await Promise.all([loadConfig(), loadProfiles(targetPage, targetSearch), loadHealth()]);
+      await Promise.all([loadConfig(), loadProfiles(targetPage, targetSearch), loadHealth(), loadAuditTrail()]);
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Nu s-au putut încărca datele pentru simulated players');
     } finally {
@@ -241,6 +250,19 @@ export default function AdminSimulatedPlayersPage() {
       setError(e?.response?.data?.error || 'Nu s-a putut încărca health');
     } finally {
       setRefreshingHealth(false);
+    }
+  };
+
+  const refreshAuditTrail = async () => {
+    setRefreshingAudit(true);
+    setError('');
+    try {
+      await loadAuditTrail();
+      toast('Audit trail refresh făcut');
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Nu s-a putut încărca audit trail');
+    } finally {
+      setRefreshingAudit(false);
     }
   };
 
@@ -420,6 +442,52 @@ export default function AdminSimulatedPlayersPage() {
                   </div>
                 )}
               </>
+            )}
+          </section>
+
+          <section style={{
+            background: '#1a1d27', border: '1px solid #2d3748',
+            borderRadius: 12, padding: 20, marginBottom: 24,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ color: '#e2e8f0', fontSize: 18, fontWeight: 600 }}>
+                Audit trail (ultimele acțiuni)
+              </h2>
+              <button
+                onClick={refreshAuditTrail}
+                disabled={refreshingAudit}
+                style={{
+                  padding: '8px 12px', background: refreshingAudit ? '#374151' : '#334155', color: '#fff',
+                  border: 'none', borderRadius: 8, cursor: refreshingAudit ? 'not-allowed' : 'pointer', fontSize: 13,
+                }}
+              >
+                {refreshingAudit ? 'Refresh...' : 'Refresh audit'}
+              </button>
+            </div>
+
+            {auditEntries.length === 0 ? (
+              <p style={{ color: '#64748b' }}>Nu există încă evenimente relevante astăzi.</p>
+            ) : (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {auditEntries.map((entry, index) => (
+                  <div key={`${entry.timestamp || 'ts'}-${index}`} style={{
+                    background: '#0f1117', border: '1px solid #2d3748', borderRadius: 8,
+                    padding: '10px 12px',
+                  }}>
+                    <div style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                      {entry.message}
+                    </div>
+                    <div style={{ color: '#94a3b8', fontSize: 12 }}>
+                      {entry.timestamp ? new Date(entry.timestamp).toLocaleString('ro-RO') : '-'}
+                      {entry.admin ? ` • admin=${entry.admin}` : ''}
+                      {entry.username ? ` • user=${entry.username}` : ''}
+                      {entry.deletedCount !== null ? ` • deleted=${entry.deletedCount}` : ''}
+                      {entry.gameType ? ` • gameType=${entry.gameType}` : ''}
+                      {entry.olderThanDays !== null ? ` • olderThanDays=${entry.olderThanDays}` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </section>
 

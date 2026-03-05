@@ -492,6 +492,65 @@ router.delete('/simulated-players/ghost-runs', adminAuth, asyncHandler(async (re
   res.json({ deletedCount: result.count });
 }));
 
+// ─── GET /api/admin/simulated-players/audit-trail ──────────────────────────
+router.get('/simulated-players/audit-trail', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const lines = Math.min(200, Math.max(1, parseInt((req.query.lines as string) || '30', 10)));
+
+  const logDir = path.join(__dirname, '../../logs');
+  const today = new Date().toISOString().split('T')[0];
+  const logPath = path.join(logDir, `combined-${today}.log`);
+
+  if (!fs.existsSync(logPath)) {
+    res.json({ entries: [] });
+    return;
+  }
+
+  const content = fs.readFileSync(logPath, 'utf-8').trim();
+  const allLines = content.split('\n').filter(Boolean);
+
+  const interestingMessages = [
+    '[ADMIN] Simulated players config updated',
+    '[ADMIN] Simulated profile created',
+    '[ADMIN] Simulated profile updated',
+    '[ADMIN] Ghost run deleted',
+    '[ADMIN] Ghost runs bulk cleanup',
+  ];
+
+  const parsed = allLines
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is Record<string, unknown> => !!entry);
+
+  const entries = parsed
+    .filter((entry) => {
+      const message = entry.message;
+      if (typeof message !== 'string') return false;
+      return interestingMessages.some((token) => message.includes(token));
+    })
+    .slice(-lines)
+    .reverse()
+    .map((entry) => ({
+      timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : null,
+      level: typeof entry.level === 'string' ? entry.level : null,
+      message: typeof entry.message === 'string' ? entry.message : '',
+      admin: typeof entry.admin === 'string' ? entry.admin : null,
+      userId: typeof entry.userId === 'string' ? entry.userId : null,
+      username: typeof entry.username === 'string' ? entry.username : null,
+      botConfigId: typeof entry.botConfigId === 'string' ? entry.botConfigId : null,
+      ghostRunId: typeof entry.ghostRunId === 'string' ? entry.ghostRunId : null,
+      deletedCount: typeof entry.deletedCount === 'number' ? entry.deletedCount : null,
+      gameType: typeof entry.gameType === 'string' ? entry.gameType : null,
+      olderThanDays: typeof entry.olderThanDays === 'number' ? entry.olderThanDays : null,
+    }));
+
+  res.json({ entries });
+}));
+
 // ─── GET /api/admin/games ────────────────────────────────────────────────────
 router.get('/games', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
   const dbGameTypes = await prisma.gameType.findMany({
