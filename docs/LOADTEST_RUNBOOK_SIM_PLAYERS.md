@@ -21,6 +21,23 @@ Set-Location g:\Integrame
 node .\backend\scripts\loadtest-simulated-metrics.js --durationSec 600 --intervalMs 2000 --username admin --password "<PAROLA>"
 ```
 
+### Nightly wrapper (10 minute implicit)
+```powershell
+Set-Location g:\Integrame\backend
+$env:ADMIN_USERNAME="admin"
+$env:ADMIN_PASSWORD="<PAROLA>"
+npm run sim:loadtest:nightly
+```
+
+## Programare zilnică (Windows Task Scheduler)
+Comandă exemplu (`23:30`):
+
+```powershell
+schtasks /Create /F /SC DAILY /ST 23:30 /TN "Integrame-SimLoadtest-Nightly" /TR "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location 'G:\Integrame\backend'; $env:ADMIN_USERNAME='admin'; $env:ADMIN_PASSWORD='<PAROLA>'; npm run sim:loadtest:nightly\""
+```
+
+Notă: task-ul va scrie automat rapoarte JSON/MD în `backend/logs` cu prefix `loadtest-simulated-nightly-*`.
+
 ## Praguri interpretare
 ### Latency (`latencyP95Ms`)
 - OK: `< 100ms`

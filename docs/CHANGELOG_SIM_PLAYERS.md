@@ -98,6 +98,13 @@ Acest fișier păstrează istoricul modificărilor pentru sistemul de simulated 
   - **Impact:** Clean long-run metrics collection (`600s`, `errorCount=0`) and reliable stability validation.
   - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
 
+### Added
+- **Area:** Tooling / Observability
+  - **Summary:** Added nightly load-test wrapper script (`sim:loadtest:nightly`) with env-based credentials and default 10-minute sampling profile.
+  - **Reason:** Make recurring stability checks easy to schedule and execute consistently.
+  - **Impact:** Reduces manual operational steps and standardizes nightly KPI collection.
+  - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
+
 ---
 
 ## Template Entry (copy/paste)

@@ -7,6 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "sim:loadtest": "node scripts/loadtest-simulated-metrics.js",
+    "sim:loadtest:nightly": "node scripts/loadtest-simulated-nightly.js",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node --project tsconfig.seed.json prisma/seed.ts",
     "db:generate": "prisma generate",
