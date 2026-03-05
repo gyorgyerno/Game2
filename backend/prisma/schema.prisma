@@ -16,6 +16,7 @@ model User {
   email        String   @unique
   username     String   @unique
   avatarUrl    String?
+  userType     String   @default("REAL") // REAL|SIMULATED|GHOST
   rating       Int      @default(1000)
   xp           Int      @default(0)
   league       String   @default("bronze")
@@ -28,8 +29,12 @@ model User {
   invitesCreated Invite[]     @relation("InviteCreator")
   sentFriendships     Friendship[] @relation("FriendshipSender")
   receivedFriendships Friendship[] @relation("FriendshipReceiver")
+  aiProfile           AIPlayerProfile?
+  skillProfile        PlayerSkillProfile?
+  ghostRuns           GhostRun[]
 
   @@index([rating])
+  @@index([userType])
   @@map("users")
 }
 
@@ -178,4 +183,87 @@ model Friendship {
 
   @@unique([senderId, receiverId])
   @@map("friendships")
+}
+
+// ─── AIPlayerProfile ─────────────────────────────────────────────────────────
+model AIPlayerProfile {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  skillLevel            Int      @default(5)
+  thinkingSpeedMsMin    Int      @default(2500)
+  thinkingSpeedMsMax    Int      @default(6000)
+  mistakeRate           Float    @default(0.12)
+  hesitationProbability Float    @default(0.18)
+  correctionProbability Float    @default(0.35)
+  playStyle             String   @default("balanced")
+  personality           String   @default("CASUAL_PLAYER")
+  preferredGames        String   @default("[]") // JSON string of gameSlug[]
+  onlineProbability     Float    @default(0.35)
+  chatProbability       Float    @default(0.06)
+  sessionLengthMin      Int      @default(8)
+  sessionLengthMax      Int      @default(25)
+  activityPattern       String   @default("{}") // JSON string
+  enabled               Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([enabled])
+  @@index([skillLevel])
+  @@map("ai_player_profiles")
+}
+
+// ─── PlayerSkillProfile ──────────────────────────────────────────────────────
+model PlayerSkillProfile {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  averageCompletionTime Float    @default(0)
+  mistakeRate           Float    @default(0)
+  successRate           Float    @default(0)
+  preferredGameTypes    String   @default("[]") // JSON string of gameSlug[]
+  winLossRatio          Float    @default(1)
+  hintUsageRate         Float    @default(0)
+  correctionRate        Float    @default(0)
+  pathEfficiency        Float    @default(0)
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("player_skill_profiles")
+}
+
+// ─── GhostRun ────────────────────────────────────────────────────────────────
+model GhostRun {
+  id             String   @id @default(uuid())
+  playerId       String
+  gameType       String
+  difficulty     Int      @default(1)
+  moves          String   @default("[]") // JSON string
+  timestamps     String   @default("[]") // JSON string
+  mistakes       Int      @default(0)
+  corrections    Int      @default(0)
+  completionTime Float    @default(0)
+  finalScore     Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  player User @relation(fields: [playerId], references: [id])
+
+  @@index([playerId, gameType])
+  @@index([createdAt])
+  @@map("ghost_runs")
+}
+
+// ─── BotConfig ───────────────────────────────────────────────────────────────
+model BotConfig {
+  id                  String   @id @default(uuid())
+  enabled             Boolean  @default(false)
+  maxBotsOnline       Int      @default(6)
+  botScoreLimit       Int      @default(5000)
+  activityFeedEnabled Boolean  @default(false)
+  chatEnabled         Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("bot_config")
 }
