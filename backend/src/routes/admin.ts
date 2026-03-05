@@ -384,6 +384,114 @@ router.patch('/simulated-players/profiles/:userId', adminAuth, asyncHandler(asyn
   res.json({ user: updatedUser, profile: updatedProfile });
 }));
 
+// ─── GET /api/admin/simulated-players/ghost-runs ───────────────────────────
+router.get('/simulated-players/ghost-runs', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const page = parseInt((req.query.page as string) || '1', 10);
+  const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '20', 10)));
+  const search = ((req.query.search as string) || '').trim();
+  const gameType = ((req.query.gameType as string) || '').trim();
+  const skip = (Math.max(1, page) - 1) * limit;
+
+  const where = {
+    ...(gameType ? { gameType } : {}),
+    ...(search ? {
+      player: {
+        OR: [
+          { username: { contains: search } },
+          { email: { contains: search } },
+        ],
+      },
+    } : {}),
+  };
+
+  const [runs, total] = await Promise.all([
+    prisma.ghostRun.findMany({
+      where,
+      include: {
+        player: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            userType: true,
+            rating: true,
+            xp: true,
+            league: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.ghostRun.count({ where }),
+  ]);
+
+  res.json({
+    runs,
+    page: Math.max(1, page),
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+  });
+}));
+
+// ─── DELETE /api/admin/simulated-players/ghost-runs/:id ────────────────────
+router.delete('/simulated-players/ghost-runs/:id', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const id = req.params.id;
+  const existing = await prisma.ghostRun.findUnique({ where: { id } });
+
+  if (!existing) {
+    res.status(404).json({ error: 'Ghost run inexistent' });
+    return;
+  }
+
+  await prisma.ghostRun.delete({ where: { id } });
+
+  logger.info('[ADMIN] Ghost run deleted', {
+    admin: req.adminUsername,
+    ghostRunId: id,
+  });
+
+  res.json({ ok: true });
+}));
+
+// ─── DELETE /api/admin/simulated-players/ghost-runs ────────────────────────
+router.delete('/simulated-players/ghost-runs', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const {
+    gameType,
+    olderThanDays,
+  } = req.body as {
+    gameType?: string;
+    olderThanDays?: number;
+  };
+
+  if (olderThanDays !== undefined && (!Number.isInteger(olderThanDays) || olderThanDays < 0 || olderThanDays > 3650)) {
+    res.status(400).json({ error: 'olderThanDays trebuie să fie integer între 0 și 3650' });
+    return;
+  }
+
+  const createdAtFilter = olderThanDays !== undefined
+    ? { lt: new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000) }
+    : undefined;
+
+  const where = {
+    ...(gameType ? { gameType } : {}),
+    ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+  };
+
+  const result = await prisma.ghostRun.deleteMany({ where });
+
+  logger.info('[ADMIN] Ghost runs bulk cleanup', {
+    admin: req.adminUsername,
+    gameType: gameType || null,
+    olderThanDays: olderThanDays ?? null,
+    deletedCount: result.count,
+  });
+
+  res.json({ deletedCount: result.count });
+}));
+
 // ─── GET /api/admin/games ────────────────────────────────────────────────────
 router.get('/games', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
   const dbGameTypes = await prisma.gameType.findMany({

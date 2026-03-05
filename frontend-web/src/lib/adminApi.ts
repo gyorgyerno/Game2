@@ -64,6 +64,29 @@ export type AIProfileRecord = {
   };
 };
 
+export type GhostRunRecord = {
+  id: string;
+  playerId: string;
+  gameType: string;
+  difficulty: number;
+  moves: string;
+  timestamps: string;
+  mistakes: number;
+  corrections: number;
+  completionTime: number;
+  finalScore: number;
+  createdAt: string;
+  player: {
+    id: string;
+    username: string;
+    email: string;
+    userType: string;
+    rating: number;
+    xp: number;
+    league: string;
+  };
+};
+
 export const getSimulatedPlayersConfig = async () => {
   const { data } = await adminApi.get<{ botConfig: BotConfig }>('/api/admin/simulated-players/config');
   return data.botConfig;
@@ -121,6 +144,27 @@ export const patchSimulatedPlayerProfile = async (
   }>
 ) => {
   const { data } = await adminApi.patch<{ user: unknown; profile: unknown }>(`/api/admin/simulated-players/profiles/${userId}`, payload);
+  return data;
+};
+
+export const listGhostRuns = async (params: { page?: number; limit?: number; search?: string; gameType?: string }) => {
+  const { data } = await adminApi.get<{
+    runs: GhostRunRecord[];
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  }>('/api/admin/simulated-players/ghost-runs', { params });
+  return data;
+};
+
+export const deleteGhostRun = async (id: string) => {
+  const { data } = await adminApi.delete<{ ok: boolean }>(`/api/admin/simulated-players/ghost-runs/${id}`);
+  return data;
+};
+
+export const cleanupGhostRuns = async (payload: { gameType?: string; olderThanDays?: number }) => {
+  const { data } = await adminApi.delete<{ deletedCount: number }>('/api/admin/simulated-players/ghost-runs', { data: payload });
   return data;
 };
 

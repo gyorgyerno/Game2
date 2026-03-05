@@ -23,7 +23,6 @@ function StatCard({ label, value, icon, color }: { label: string; value: number 
     </div>
   );
 }
-
 export default function AdminDashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState('');
