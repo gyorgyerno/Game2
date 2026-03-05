@@ -66,7 +66,8 @@ Prioritate matchmaking:
 - [x] Activity feed + bot chat (runtime behavior implementation)
 - [x] Enforcement `botScoreLimit` în leaderboard
 - [x] Runtime metrics + load-test tooling
-- [ ] Tuning anti-detection + rulare load tests de validare
+- [x] Rulare load tests de validare (1m + 10m)
+- [ ] Tuning anti-detection final
 
 ## Fișiere țintă în repo
 - `backend/prisma/schema.prisma`
@@ -99,6 +100,9 @@ Prioritate matchmaking:
 - adăugat monitor runtime metrics + script de load test cu raport JSON/MD
 
 ## Următorii pași
-1. Rulează load tests pentru scheduler/feed/chat (stability + latency)
-2. Tuning anti-detection final (variație mesaje/timing/context)
-3. Alerting și error tracking agregat pentru AI/Ghost
+1. Tuning anti-detection final (variație mesaje/timing/context)
+2. Alerting și error tracking agregat pentru AI/Ghost
+3. Automatizare periodică load-test + raport trend (daily/weekly)
+
+## Runbook
+- `docs/LOADTEST_RUNBOOK_SIM_PLAYERS.md`

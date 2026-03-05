@@ -84,6 +84,20 @@ Acest fișier păstrează istoricul modificărilor pentru sistemul de simulated 
   - **Impact:** Improves execution predictability and validation discipline.
   - **Flags:** N/A
 
+### Added
+- **Area:** Docs / Observability
+  - **Summary:** Added dedicated load-test runbook with commands, KPI thresholds (OK/WARN/CRIT), and troubleshooting flow.
+  - **Reason:** Standardize simulated runtime validation and reduce ad-hoc operational decisions.
+  - **Impact:** Faster, repeatable diagnostics and clearer go/no-go criteria for rollout.
+  - **Flags:** N/A
+
+### Changed
+- **Area:** Backend / Observability
+  - **Summary:** Excluded `/api/admin/simulated-players/health` from global rate limiter to prevent synthetic 429 during admin health polling load-tests.
+  - **Reason:** 10-minute sampling tests were rate-limited by generic API cap, invalidating measurements.
+  - **Impact:** Clean long-run metrics collection (`600s`, `errorCount=0`) and reliable stability validation.
+  - **Flags:** `SIM_PLAYERS_ENABLED`, `BOT_CHAT_ENABLED`, `BOT_ACTIVITY_FEED_ENABLED`
+
 ---
 
 ## Template Entry (copy/paste)

@@ -80,6 +80,7 @@
 ## Observability
 - [x] logging decizii matchmaking
 - [x] metrics latență acțiuni bot (p95/event-loop/queue depth)
+- [x] runbook operațional load test (comenzi + praguri + troubleshooting)
 - [ ] error tracking pe module AI/Ghost (agregat + alerting)
 
 ## Definition of Done (MVP)
