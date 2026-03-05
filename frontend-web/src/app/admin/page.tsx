@@ -75,6 +75,7 @@ export default function AdminDashboard() {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {[
             { href: '/admin/games', label: '🕹️ Gestionează jocuri' },
+            { href: '/admin/simulated-players', label: '🤖 Simulated AI' },
             { href: '/admin/users', label: '👥 Vezi utilizatori' },
             { href: '/admin/matches', label: '🎮 Meciuri active' },
             { href: '/admin/invites', label: '🎫 Gestionează invites' },
