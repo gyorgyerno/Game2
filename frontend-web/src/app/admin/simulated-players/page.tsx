@@ -6,9 +6,11 @@ import {
   BotConfig,
   createSimulatedPlayerProfile,
   getSimulatedPlayersConfig,
+  getSimulatedPlayersHealth,
   listSimulatedPlayerProfiles,
   patchSimulatedPlayerProfile,
   patchSimulatedPlayersConfig,
+  SimulatedPlayersHealth,
 } from '@/lib/adminApi';
 
 type ConfigDraft = {
@@ -61,11 +63,13 @@ export default function AdminSimulatedPlayersPage() {
   const [config, setConfig] = useState<BotConfig | null>(null);
   const [configDraft, setConfigDraft] = useState<ConfigDraft | null>(null);
   const [profiles, setProfiles] = useState<AIProfileRecord[]>([]);
+  const [health, setHealth] = useState<SimulatedPlayersHealth | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [refreshingHealth, setRefreshingHealth] = useState(false);
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -129,11 +133,16 @@ export default function AdminSimulatedPlayersPage() {
     setEditDrafts(drafts);
   };
 
+  const loadHealth = async () => {
+    const data = await getSimulatedPlayersHealth();
+    setHealth(data);
+  };
+
   const loadAll = async (targetPage = page, targetSearch = search) => {
     setLoading(true);
     setError('');
     try {
-      await Promise.all([loadConfig(), loadProfiles(targetPage, targetSearch)]);
+      await Promise.all([loadConfig(), loadProfiles(targetPage, targetSearch), loadHealth()]);
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Nu s-au putut încărca datele pentru simulated players');
     } finally {
@@ -221,6 +230,22 @@ export default function AdminSimulatedPlayersPage() {
       setSavingProfileId(null);
     }
   };
+
+  const refreshHealth = async () => {
+    setRefreshingHealth(true);
+    setError('');
+    try {
+      await loadHealth();
+      toast('Health refresh făcut');
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Nu s-a putut încărca health');
+    } finally {
+      setRefreshingHealth(false);
+    }
+  };
+
+  const chatGuardrailBlocked = Boolean(configDraft?.chatEnabled && health && !health.features.botChatEnabled);
+  const feedGuardrailBlocked = Boolean(configDraft?.activityFeedEnabled && health && !health.features.botActivityFeedEnabled);
 
   return (
     <div>
@@ -334,6 +359,68 @@ export default function AdminSimulatedPlayersPage() {
             >
               {savingConfig ? 'Se salvează...' : 'Salvează config'}
             </button>
+          </section>
+
+          <section style={{
+            background: '#1a1d27', border: '1px solid #2d3748',
+            borderRadius: 12, padding: 20, marginBottom: 24,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ color: '#e2e8f0', fontSize: 18, fontWeight: 600 }}>
+                Health & guardrails
+              </h2>
+              <button
+                onClick={refreshHealth}
+                disabled={refreshingHealth}
+                style={{
+                  padding: '8px 12px', background: refreshingHealth ? '#374151' : '#334155', color: '#fff',
+                  border: 'none', borderRadius: 8, cursor: refreshingHealth ? 'not-allowed' : 'pointer', fontSize: 13,
+                }}
+              >
+                {refreshingHealth ? 'Refresh...' : 'Refresh health'}
+              </button>
+            </div>
+
+            {!health ? (
+              <p style={{ color: '#64748b' }}>Health indisponibil.</p>
+            ) : (
+              <>
+                <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 12 }}>
+                  <div style={{ background: '#0f1117', border: '1px solid #2d3748', borderRadius: 8, padding: 10 }}>
+                    <div style={{ color: '#64748b', fontSize: 12 }}>Simulated users</div>
+                    <div style={{ color: '#e2e8f0', fontSize: 20, fontWeight: 700 }}>{health.counters.simulatedUsers}</div>
+                  </div>
+                  <div style={{ background: '#0f1117', border: '1px solid #2d3748', borderRadius: 8, padding: 10 }}>
+                    <div style={{ color: '#64748b', fontSize: 12 }}>Enabled AI profiles</div>
+                    <div style={{ color: '#e2e8f0', fontSize: 20, fontWeight: 700 }}>{health.counters.enabledProfiles}</div>
+                  </div>
+                  <div style={{ background: '#0f1117', border: '1px solid #2d3748', borderRadius: 8, padding: 10 }}>
+                    <div style={{ color: '#64748b', fontSize: 12 }}>Waiting matches with bots</div>
+                    <div style={{ color: '#e2e8f0', fontSize: 20, fontWeight: 700 }}>{health.counters.waitingMatchesWithBots}</div>
+                  </div>
+                  <div style={{ background: '#0f1117', border: '1px solid #2d3748', borderRadius: 8, padding: 10 }}>
+                    <div style={{ color: '#64748b', fontSize: 12 }}>Scheduled matches</div>
+                    <div style={{ color: '#e2e8f0', fontSize: 20, fontWeight: 700 }}>{health.orchestrator.scheduledMatches}</div>
+                  </div>
+                </div>
+
+                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 8 }}>
+                  Feature flags runtime: SIM={health.features.simPlayersEnabled ? 'ON' : 'OFF'} | GHOST={health.features.ghostPlayersEnabled ? 'ON' : 'OFF'} | CHAT={health.features.botChatEnabled ? 'ON' : 'OFF'} | FEED={health.features.botActivityFeedEnabled ? 'ON' : 'OFF'}
+                </div>
+
+                {(chatGuardrailBlocked || feedGuardrailBlocked) && (
+                  <div style={{
+                    background: '#3b2f12', border: '1px solid #a16207', borderRadius: 8,
+                    padding: '10px 12px', color: '#fcd34d', fontSize: 13,
+                  }}>
+                    Guardrail activ: config DB are toggle ON, dar feature flag-ul runtime este OFF pentru
+                    {chatGuardrailBlocked ? ' chat' : ''}
+                    {chatGuardrailBlocked && feedGuardrailBlocked ? ' și' : ''}
+                    {feedGuardrailBlocked ? ' activity feed' : ''}.
+                  </div>
+                )}
+              </>
+            )}
           </section>
 
           <section style={{

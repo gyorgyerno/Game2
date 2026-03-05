@@ -87,6 +87,30 @@ export type GhostRunRecord = {
   };
 };
 
+export type SimulatedPlayersHealth = {
+  features: {
+    simPlayersEnabled: boolean;
+    ghostPlayersEnabled: boolean;
+    botChatEnabled: boolean;
+    botActivityFeedEnabled: boolean;
+  };
+  botConfig: BotConfig | null;
+  counters: {
+    simulatedUsers: number;
+    enabledProfiles: number;
+    waitingMatchesWithBots: number;
+  };
+  orchestrator: {
+    scheduledMatches: number;
+    totalScheduled: number;
+    totalJoined: number;
+    totalSkipped: number;
+    lastSkipReason?: string;
+    lastActionAt?: string;
+    lastDifficultyMode?: string;
+  };
+};
+
 export const getSimulatedPlayersConfig = async () => {
   const { data } = await adminApi.get<{ botConfig: BotConfig }>('/api/admin/simulated-players/config');
   return data.botConfig;
@@ -101,6 +125,11 @@ export const patchSimulatedPlayersConfig = async (payload: Partial<{
 }>) => {
   const { data } = await adminApi.patch<{ botConfig: BotConfig }>('/api/admin/simulated-players/config', payload);
   return data.botConfig;
+};
+
+export const getSimulatedPlayersHealth = async () => {
+  const { data } = await adminApi.get<SimulatedPlayersHealth>('/api/admin/simulated-players/health');
+  return data;
 };
 
 export const listSimulatedPlayerProfiles = async (params: { page?: number; limit?: number; search?: string }) => {
