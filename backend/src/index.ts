@@ -42,6 +42,7 @@ app.use(
     max: 200,
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (req) => req.path === '/api/admin/simulated-players/health',
   })
 );
 
