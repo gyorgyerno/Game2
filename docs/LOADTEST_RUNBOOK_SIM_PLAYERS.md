@@ -38,6 +38,21 @@ schtasks /Create /F /SC DAILY /ST 23:30 /TN "Integrame-SimLoadtest-Nightly" /TR 
 
 Notă: task-ul va scrie automat rapoarte JSON/MD în `backend/logs` cu prefix `loadtest-simulated-nightly-*`.
 
+## Cleanup rapoarte vechi
+### Dry-run (nu șterge, doar listează)
+```powershell
+Set-Location g:\Integrame\backend
+npm run sim:reports:cleanup:dry
+```
+
+### Execuție reală
+```powershell
+Set-Location g:\Integrame\backend
+npm run sim:reports:cleanup -- --days 14
+```
+
+Opțional: programează cleanup-ul să ruleze după task-ul nightly.
+
 ## Praguri interpretare
 ### Latency (`latencyP95Ms`)
 - OK: `< 100ms`
