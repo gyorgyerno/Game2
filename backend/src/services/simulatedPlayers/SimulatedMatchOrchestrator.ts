@@ -15,6 +15,14 @@ type OrchestratorHealth = {
   totalSkipped: number;
   lastSkipReason?: string;
   lastActionAt?: string;
+  lastDifficultyMode?: string;
+};
+
+type DifficultyTuning = {
+  mode: 'assist' | 'balanced' | 'challenge';
+  targetSkillLevel: number;
+  minSkillLevel: number;
+  maxSkillLevel: number;
 };
 
 class SimulatedMatchOrchestrator {
@@ -24,6 +32,7 @@ class SimulatedMatchOrchestrator {
   private totalSkipped = 0;
   private lastSkipReason?: string;
   private lastActionAt?: Date;
+  private lastDifficultyMode?: string;
 
   getHealthSnapshot(): OrchestratorHealth {
     return {
@@ -33,6 +42,7 @@ class SimulatedMatchOrchestrator {
       totalSkipped: this.totalSkipped,
       lastSkipReason: this.lastSkipReason,
       lastActionAt: this.lastActionAt?.toISOString(),
+      lastDifficultyMode: this.lastDifficultyMode,
     };
   }
 
@@ -45,6 +55,52 @@ class SimulatedMatchOrchestrator {
 
   private isFillEnabled(): boolean {
     return config.features.simPlayersEnabled || config.features.ghostPlayersEnabled;
+  }
+
+  private resolveDifficultyTuning(realPlayers: Array<{ user: { skillProfile: { winLossRatio: number } | null } }>): DifficultyTuning {
+    const ratios = realPlayers
+      .map((player) => player.user.skillProfile?.winLossRatio)
+      .filter((ratio): ratio is number => typeof ratio === 'number' && Number.isFinite(ratio));
+
+    if (ratios.length === 0) {
+      this.lastDifficultyMode = 'balanced';
+      return {
+        mode: 'balanced',
+        targetSkillLevel: 5,
+        minSkillLevel: 3,
+        maxSkillLevel: 7,
+      };
+    }
+
+    const averageRatio = ratios.reduce((sum, value) => sum + value, 0) / ratios.length;
+
+    if (averageRatio < 0.85) {
+      this.lastDifficultyMode = 'assist';
+      return {
+        mode: 'assist',
+        targetSkillLevel: 4,
+        minSkillLevel: 2,
+        maxSkillLevel: 6,
+      };
+    }
+
+    if (averageRatio > 1.25) {
+      this.lastDifficultyMode = 'challenge';
+      return {
+        mode: 'challenge',
+        targetSkillLevel: 7,
+        minSkillLevel: 5,
+        maxSkillLevel: 9,
+      };
+    }
+
+    this.lastDifficultyMode = 'balanced';
+    return {
+      mode: 'balanced',
+      targetSkillLevel: 5,
+      minSkillLevel: 3,
+      maxSkillLevel: 7,
+    };
   }
 
   private async resolveGhostCandidate(match: { gameType: string; level: number; id: string }, currentPlayerIds: string[]) {
@@ -94,18 +150,53 @@ class SimulatedMatchOrchestrator {
     };
   }
 
-  private async resolveSimulatedCandidate(currentPlayerIds: string[]) {
+  private async resolveSimulatedCandidate(currentPlayerIds: string[], gameType: string, tuning: DifficultyTuning) {
     if (!config.features.simPlayersEnabled) return null;
 
-    const candidate = await prisma.user.findFirst({
+    const candidates = await prisma.user.findMany({
       where: {
         userType: 'SIMULATED',
-        aiProfile: { is: { enabled: true } },
+        aiProfile: {
+          is: {
+            enabled: true,
+            skillLevel: {
+              gte: tuning.minSkillLevel,
+              lte: tuning.maxSkillLevel,
+            },
+          },
+        },
         id: { notIn: currentPlayerIds.length > 0 ? currentPlayerIds : ['__none__'] },
       },
       include: { aiProfile: true },
+      take: 30,
       orderBy: { createdAt: 'asc' },
     });
+
+    const fallbackCandidates = candidates.length > 0
+      ? candidates
+      : await prisma.user.findMany({
+          where: {
+            userType: 'SIMULATED',
+            aiProfile: { is: { enabled: true } },
+            id: { notIn: currentPlayerIds.length > 0 ? currentPlayerIds : ['__none__'] },
+          },
+          include: { aiProfile: true },
+          take: 30,
+          orderBy: { createdAt: 'asc' },
+        });
+
+    const candidate = [...fallbackCandidates]
+      .sort((left, right) => {
+        const leftDistance = Math.abs((left.aiProfile?.skillLevel ?? 5) - tuning.targetSkillLevel);
+        const rightDistance = Math.abs((right.aiProfile?.skillLevel ?? 5) - tuning.targetSkillLevel);
+
+        if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+
+        const leftPrefersGame = left.aiProfile?.preferredGames?.includes(gameType) ? 1 : 0;
+        const rightPrefersGame = right.aiProfile?.preferredGames?.includes(gameType) ? 1 : 0;
+        return rightPrefersGame - leftPrefersGame;
+      })
+      .at(0);
 
     if (!candidate) return null;
 
@@ -171,7 +262,7 @@ class SimulatedMatchOrchestrator {
 
       const match = await prisma.match.findUnique({
         where: { id: params.matchId },
-        include: { players: { include: { user: true } } },
+        include: { players: { include: { user: { include: { skillProfile: true } } } } },
       });
 
       if (!match) {
@@ -191,16 +282,20 @@ class SimulatedMatchOrchestrator {
         return;
       }
 
-      const realUsersInMatch = match.players.filter((player) => player.user.userType === 'REAL').length;
-      if (realUsersInMatch === 0) {
+      const realPlayers = match.players.filter((player) => player.user.userType === 'REAL');
+      if (realPlayers.length === 0) {
         this.registerSkip('no_real_user_in_match', { matchId: params.matchId });
         return;
       }
 
+      const difficultyTuning = this.resolveDifficultyTuning(realPlayers);
+
       const currentPlayerIds = match.players.map((player) => player.userId);
 
       const ghostCandidate = await this.resolveGhostCandidate(match, currentPlayerIds);
-      const simulatedCandidate = ghostCandidate ? null : await this.resolveSimulatedCandidate(currentPlayerIds);
+      const simulatedCandidate = ghostCandidate
+        ? null
+        : await this.resolveSimulatedCandidate(currentPlayerIds, match.gameType, difficultyTuning);
       const selectedCandidate = ghostCandidate ?? simulatedCandidate;
 
       if (!selectedCandidate) {
@@ -252,6 +347,7 @@ class SimulatedMatchOrchestrator {
         matchId: params.matchId,
         candidateUserId: selectedCandidate.userId,
         candidateType: selectedCandidate.joinType,
+        difficultyMode: this.lastDifficultyMode,
       });
       this.totalJoined += 1;
       this.lastActionAt = new Date();
