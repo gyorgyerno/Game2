@@ -74,6 +74,7 @@ export default function AdminDashboard() {
         </h2>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {[
+            { href: '/admin/games', label: '🕹️ Gestionează jocuri' },
             { href: '/admin/users', label: '👥 Vezi utilizatori' },
             { href: '/admin/matches', label: '🎮 Meciuri active' },
             { href: '/admin/invites', label: '🎫 Gestionează invites' },

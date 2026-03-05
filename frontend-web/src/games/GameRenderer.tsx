@@ -2,6 +2,7 @@
 import type { GamePlayProps } from './IGameUI';
 import IntegramePlay from './integrame/IntegramePlay';
 import MazePlay from './maze/MazePlay';
+import { getGameByType } from './registry';
 
 /**
  * GameRenderer — punct unic de intrare pentru UI-ul unui joc.
@@ -15,10 +16,11 @@ interface GameRendererProps extends GamePlayProps {
 }
 
 export default function GameRenderer({ gameType, ...props }: GameRendererProps) {
-  switch (gameType) {
+  const gameDef = getGameByType(gameType);
+
+  switch (gameDef?.uiVariant) {
     case 'maze':
       return <MazePlay {...props} />;
-    case 'integrame':
     default:
       return <IntegramePlay {...props} />;
   }

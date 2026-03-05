@@ -51,6 +51,7 @@ model GameType {
   description String
   iconUrl     String?
   isActive    Boolean @default(true)
+  displayOrder Int?
 
   matches Match[]
 

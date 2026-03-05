@@ -31,7 +31,7 @@ export interface AuthResponse {
 }
 
 // ─── Game Types ───────────────────────────────────────────────────────────────
-export type GameType = 'integrame' | 'slogane' | string;
+export type GameType = 'integrame' | 'labirinturi' | 'maze' | 'slogane' | string;
 
 export interface GameTypeConfig {
   id: GameType;
@@ -68,6 +68,20 @@ export const GAME_RULES: Record<GameType, GameRules> = {
     bonusFirstFinisher: 10,
     bonusFinalizare: 20,
     timeLimit: 180,
+  },
+  labirinturi: {
+    pointsPerCorrect: 5,
+    pointsPerMistake: -3,
+    bonusFirstFinisher: 50,
+    bonusFinalizare: 0,
+    timeLimit: 60,
+  },
+  maze: {
+    pointsPerCorrect: 5,
+    pointsPerMistake: -3,
+    bonusFirstFinisher: 50,
+    bonusFinalizare: 0,
+    timeLimit: 60,
   },
   slogane: {
     pointsPerCorrect: 15,
@@ -203,13 +217,15 @@ export interface SocketJoinMatch {
 }
 export interface SocketPlayerProgress {
   matchId: string;
-  correctAnswers: number;
-  mistakes: number;
+  correctAnswers?: number;
+  mistakes?: number;
+  metrics?: Record<string, unknown>;
 }
 export interface SocketPlayerFinish {
   matchId: string;
-  correctAnswers: number;
-  mistakes: number;
+  correctAnswers?: number;
+  mistakes?: number;
+  metrics?: Record<string, unknown>;
 }
 
 // ─── Leaderboard ──────────────────────────────────────────────────────────────

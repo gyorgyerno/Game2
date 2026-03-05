@@ -6,6 +6,7 @@ import Link from 'next/link';
 
 const NAV = [
   { href: '/admin', label: 'Dashboard', icon: '📊' },
+  { href: '/admin/games', label: 'Jocuri', icon: '🕹️' },
   { href: '/admin/users', label: 'Utilizatori', icon: '👥' },
   { href: '/admin/matches', label: 'Meciuri', icon: '🎮' },
   { href: '/admin/invites', label: 'Invite Codes', icon: '🎫' },

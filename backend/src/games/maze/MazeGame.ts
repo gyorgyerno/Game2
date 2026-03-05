@@ -60,3 +60,14 @@ export const MazeGame: IGame = {
       validDirections.includes(action.direction);
   },
 };
+
+const labirinturiMeta: GameMeta = {
+  ...meta,
+  id: 'labirinturi',
+  name: 'Labirinturi',
+};
+
+export const LabirinturiGame: IGame = {
+  ...MazeGame,
+  meta: labirinturiMeta,
+};

@@ -26,6 +26,17 @@ async function main() {
     },
   });
 
+  await prisma.gameType.upsert({
+    where: { id: 'maze' },
+    update: {},
+    create: {
+      id: 'maze',
+      name: 'Labirinturi',
+      description: 'Navighează labirintul în modul multiplayer',
+      isActive: true,
+    },
+  });
+
   // Demo users
   const demoUsers = [
     { email: 'alice@test.ro', username: 'Alice', rating: 1850, xp: 2400, league: 'diamond' },

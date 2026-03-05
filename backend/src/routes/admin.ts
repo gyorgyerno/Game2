@@ -8,8 +8,14 @@ import logger from '../logger';
 import { config } from '../config';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { asyncHandler } from '../middleware/errorHandler';
+import { gameRegistry } from '../games/GameRegistry';
 
 const router = Router();
+
+function toCanonicalGameType(gameType: string): string {
+  if (gameType === 'maze') return 'labirinturi';
+  return gameType;
+}
 
 // ─── POST /api/admin/login ────────────────────────────────────────────────────
 router.post('/login', asyncHandler(async (req: Request, res: Response) => {
@@ -49,6 +55,123 @@ router.get('/stats', adminAuth, asyncHandler(async (_req: AdminRequest, res: Res
     }),
   ]);
   res.json({ totalUsers, totalMatches, activeMatches, totalInvites, recentUsers });
+}));
+
+// ─── GET /api/admin/games ────────────────────────────────────────────────────
+router.get('/games', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const dbGameTypes = await prisma.gameType.findMany({
+    select: { id: true, name: true, description: true, isActive: true, iconUrl: true, displayOrder: true },
+  });
+
+  const dbByCanonical = new Map<string, {
+    id: string;
+    name: string;
+    description: string;
+    isActive: boolean;
+    iconUrl: string | null;
+    displayOrder: number | null;
+  }>();
+  for (const dbGame of dbGameTypes) {
+    dbByCanonical.set(toCanonicalGameType(dbGame.id), dbGame);
+  }
+
+  const seen = new Set<string>();
+  const games = gameRegistry.listAll()
+    .map((game, index) => ({ game, index }))
+    .filter(({ game }) => {
+      const canonical = toCanonicalGameType(game.meta.id);
+      if (seen.has(canonical)) return false;
+      seen.add(canonical);
+      return true;
+    })
+    .map(({ game, index }) => {
+      const canonical = toCanonicalGameType(game.meta.id);
+      const dbGame = dbByCanonical.get(canonical);
+      return {
+        id: canonical,
+        name: dbGame?.name || game.meta.name,
+        description: dbGame?.description || game.meta.description,
+        icon: dbGame?.iconUrl || game.meta.icon,
+        isActive: dbGame?.isActive ?? true,
+        order: dbGame?.displayOrder ?? (index + 1) * 10,
+      };
+    })
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+
+  res.json({ games });
+}));
+
+// ─── PATCH /api/admin/games/:id ──────────────────────────────────────────────
+router.patch('/games/:id', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const id = toCanonicalGameType(req.params.id);
+  const { isActive } = req.body as { isActive?: boolean };
+
+  if (typeof isActive !== 'boolean') {
+    res.status(400).json({ error: 'isActive trebuie să fie boolean' });
+    return;
+  }
+
+  const known = gameRegistry.listAll().some((game) => toCanonicalGameType(game.meta.id) === id);
+  if (!known) {
+    res.status(404).json({ error: 'Joc necunoscut' });
+    return;
+  }
+
+  const gameMeta = gameRegistry.listAll().find((game) => toCanonicalGameType(game.meta.id) === id)?.meta;
+
+  const updated = await prisma.gameType.upsert({
+    where: { id },
+    create: {
+      id,
+      name: gameMeta?.name || id,
+      description: gameMeta?.description || `Game ${id}`,
+      iconUrl: gameMeta?.icon,
+      isActive,
+    },
+    update: {
+      isActive,
+    },
+  });
+
+  logger.info(`[ADMIN] Game toggled: ${id} isActive=${isActive} by ${req.adminUsername}`);
+  res.json({ game: updated });
+}));
+
+// ─── PATCH /api/admin/games/:id/order ───────────────────────────────────────
+router.patch('/games/:id/order', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const id = toCanonicalGameType(req.params.id);
+  const { order } = req.body as { order?: number };
+
+  if (!Number.isInteger(order)) {
+    res.status(400).json({ error: 'order trebuie să fie număr întreg' });
+    return;
+  }
+
+  const known = gameRegistry.listAll().some((game) => toCanonicalGameType(game.meta.id) === id);
+  if (!known) {
+    res.status(404).json({ error: 'Joc necunoscut' });
+    return;
+  }
+
+  const gameMeta = gameRegistry.listAll().find((game) => toCanonicalGameType(game.meta.id) === id)?.meta;
+
+  const updated = await prisma.gameType.upsert({
+    where: { id },
+    create: {
+      id,
+      name: gameMeta?.name || id,
+      description: gameMeta?.description || `Game ${id}`,
+      iconUrl: gameMeta?.icon,
+      isActive: true,
+      displayOrder: order,
+    },
+    update: {
+      displayOrder: order,
+    },
+  });
+
+  logger.info(`[ADMIN] Game order updated: ${id} order=${order} by ${req.adminUsername}`);
+  res.json({ game: updated });
 }));
 
 // ─── GET /api/admin/users ─────────────────────────────────────────────────────

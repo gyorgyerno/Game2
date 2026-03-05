@@ -1,9 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Lock, Copy, Check } from 'lucide-react';
 import { MatchPlayer } from '@integrame/shared';
 import { invitesApi } from '@/lib/api';
 import clsx from 'clsx';
+
+const FRIEND_INVITE_TTL_SECONDS = 300;
 
 interface Props {
   players: (MatchPlayer & { user?: { username: string; avatarUrl?: string } })[];
@@ -12,6 +14,7 @@ interface Props {
   gameType: string;
   level: number;
   myUserId: string;
+  allowInvite?: boolean;
 }
 
 const INITIALS_BG = [
@@ -19,18 +22,69 @@ const INITIALS_BG = [
   'bg-orange-500', 'bg-pink-500', 'bg-teal-500', 'bg-indigo-500',
 ];
 
-export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, level, myUserId }: Props) {
+export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, level, myUserId, allowInvite = false }: Props) {
   const [inviteUrl, setInviteUrl] = useState('');
   const [copied, setCopied] = useState(false);
   const [showInvitePanel, setShowInvitePanel] = useState(false);
+  const [inviteSecondsLeft, setInviteSecondsLeft] = useState<number | null>(null);
+  const [inviteExpiresAt, setInviteExpiresAt] = useState<number | null>(null);
 
   async function handleInvite() {
     try {
-      const { data } = await invitesApi.create({ matchId, gameType, level });
+      const { data } = await invitesApi.create({ matchId, gameType, level, ttlSeconds: FRIEND_INVITE_TTL_SECONDS });
       const url = `${window.location.origin}/invite/${data.code}`;
       setInviteUrl(url);
+      const expiresAtTs = data.expiresAt ? new Date(data.expiresAt).getTime() : Date.now() + FRIEND_INVITE_TTL_SECONDS * 1000;
+      setInviteExpiresAt(expiresAtTs);
+      setInviteSecondsLeft(Math.max(0, Math.ceil((expiresAtTs - Date.now()) / 1000)));
       setShowInvitePanel(true);
     } catch { /* noop */ }
+  }
+
+  useEffect(() => {
+    if (!inviteExpiresAt) return;
+
+    const timer = setInterval(() => {
+      const secondsLeft = Math.max(0, Math.ceil((inviteExpiresAt - Date.now()) / 1000));
+      setInviteSecondsLeft(secondsLeft);
+
+      if (secondsLeft === 0) {
+        setInviteUrl('');
+        setInviteExpiresAt(null);
+        setInviteSecondsLeft(null);
+        setShowInvitePanel(false);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [inviteExpiresAt]);
+
+  useEffect(() => {
+    if (!allowInvite || !matchId) return;
+
+    invitesApi.getActiveByMatch(matchId)
+      .then(({ data }) => {
+        const url = data?.inviteUrl || `${window.location.origin}/invite/${data.code}`;
+        setInviteUrl(url);
+        if (data?.expiresAt) {
+          const expiresAtTs = new Date(data.expiresAt).getTime();
+          if (expiresAtTs > Date.now()) {
+            setInviteExpiresAt(expiresAtTs);
+            setInviteSecondsLeft(Math.max(0, Math.ceil((expiresAtTs - Date.now()) / 1000)));
+          }
+        }
+      })
+      .catch(() => {
+        setInviteUrl('');
+        setInviteExpiresAt(null);
+        setInviteSecondsLeft(null);
+      });
+  }, [allowInvite, matchId]);
+
+  function formatSeconds(seconds: number) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
 
   async function handleCopy() {
@@ -51,9 +105,23 @@ export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, 
   return (
     <aside className="fixed left-0 top-14 bottom-0 w-[180px] border-r border-gray-100 bg-white flex flex-col items-center pt-4 pb-6 gap-3 overflow-y-auto z-30">
       {/* Invite label */}
-      <div className="text-[10px] text-center text-gray-400 font-medium px-2 leading-tight">
-        Invită prieteni<br />la duel
-      </div>
+      {allowInvite && (
+        <div className="text-[10px] text-center text-gray-400 font-medium px-2 leading-tight">
+          Invită prieteni<br />la duel
+        </div>
+      )}
+
+      {allowInvite && inviteUrl && inviteSecondsLeft !== null && (
+        <div className="w-[150px] rounded-xl border border-violet-200 bg-violet-50 px-2 py-2 text-center">
+          <div className="text-[11px] font-semibold text-violet-700">⏳ Link activ: {formatSeconds(inviteSecondsLeft)}</div>
+          <button
+            onClick={() => setShowInvitePanel(true)}
+            className="mt-1 text-[10px] font-semibold text-violet-600 hover:text-violet-800"
+          >
+            Vezi link
+          </button>
+        </div>
+      )}
 
       {/* Players */}
       {sortedPlayers.map((p, idx) => {
@@ -89,7 +157,7 @@ export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, 
       })}
 
       {/* Empty / invite slots */}
-      {emptySlots > 0 && (
+      {allowInvite && emptySlots > 0 && (
         <div className="flex flex-col items-center gap-1">
           <button
             onClick={handleInvite}
@@ -115,7 +183,10 @@ export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, 
               <h3 className="text-base font-bold text-gray-800">Invită un prieten la duel</h3>
               <button onClick={() => setShowInvitePanel(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
             </div>
-            <p className="text-xs text-gray-500 mb-3">Trimite linkul de mai jos prietenului tău. Expiră în 24 de ore.</p>
+            <p className="text-xs text-gray-500 mb-3">
+              Trimite linkul de mai jos prietenului tău.
+              {inviteSecondsLeft !== null ? ` Expiră în ${formatSeconds(inviteSecondsLeft)}.` : ' Expiră în 5 minute.'}
+            </p>
             <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
               <span className="flex-1 text-xs text-gray-700 font-mono truncate">{inviteUrl}</span>
               <button

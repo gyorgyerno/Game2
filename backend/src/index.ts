@@ -20,6 +20,7 @@ import logsRoutes from './routes/logs';
 import adminRoutes from './routes/admin';
 import aiRoutes from './routes/ai';
 import friendRoutes from './routes/friends';
+import gamesRoutes from './routes/games';
 import prisma from './prisma';
 
 const app = express();
@@ -52,6 +53,7 @@ app.use('/api/logs', logsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/friends', friendRoutes);
+app.use('/api/games', gamesRoutes);
 
 app.get('/health', (_req: import('express').Request, res: import('express').Response) =>
   res.json({ status: 'ok', ts: new Date() })
@@ -87,7 +89,8 @@ server.listen(config.port, async () => {
   try {
     const gameTypes = [
       { id: 'integrame', name: 'Integrame', description: 'Rezolva integrame cu alti jucatori' },
-      { id: 'cuvinte', name: 'Cuvinte', description: 'Joc cu cuvinte' },
+      { id: 'maze', name: 'Labirinturi', description: 'Navigheaza labirintul in multiplayer' },
+      { id: 'slogane', name: 'Slogane', description: 'Joc cu slogane' },
     ];
     for (const gt of gameTypes) {
       await prisma.gameType.upsert({

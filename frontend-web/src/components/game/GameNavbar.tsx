@@ -2,6 +2,8 @@
 import { useState } from 'react';
 import { ChevronDown, Trophy, Crown } from 'lucide-react';
 import { User } from '@integrame/shared';
+import { getGameByType } from '@/games/registry';
+import { useGamesCatalog } from '@/games/useGamesCatalog';
 
 interface LevelUpNotif {
   level: number;
@@ -16,18 +18,13 @@ interface Props {
   onGameChange?: (g: string) => void;
 }
 
-const GAMES = [
-  { id: 'integrame', label: 'Integrame', emoji: '📝' },
-  { id: 'slogane', label: 'Slogane', emoji: '💬' },
-];
-
 export default function GameNavbar({ user, xpGained, levelUp, gameType, onGameChange }: Props) {
   const [open, setOpen] = useState(false);
-  const current = GAMES.find((g) => g.id === gameType) || GAMES[0];
+  const games = useGamesCatalog();
+  const current = getGameByType(gameType) || games[0] || { id: 'integrame', label: 'Integrame', emoji: '📝' };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-40 bg-white border-b border-gray-200 h-14 flex items-center justify-between px-4 shadow-sm">
-      {/* Left spacer for sidebar */}
       <div className="w-[180px]" />
 
       {/* Center – empty, grid takes center */}
@@ -47,7 +44,7 @@ export default function GameNavbar({ user, xpGained, levelUp, gameType, onGameCh
           </button>
           {open && (
             <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[140px]">
-              {GAMES.map((g) => (
+              {games.map((g) => (
                 <button
                   key={g.id}
                   onClick={() => { onGameChange?.(g.id); setOpen(false); }}

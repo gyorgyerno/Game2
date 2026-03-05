@@ -15,6 +15,163 @@ const matchTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 const countdownStarted: Set<string> = new Set();
 // Tracker socket.id → matchId (pentru detectare disconnect)
 const socketMatchMap: Map<string, string> = new Map();
+const progressRateState: Map<string, { windowStart: number; count: number }> = new Map();
+
+const PROGRESS_RATE_WINDOW_MS = 1000;
+const PROGRESS_RATE_MAX_PER_WINDOW = 10;
+
+type LegacyProgressPayload = {
+  matchId: string;
+  correctAnswers: number;
+  mistakes: number;
+};
+
+type GenericProgressPayload = {
+  matchId: string;
+  metrics?: Record<string, unknown>;
+  correctAnswers?: number;
+  mistakes?: number;
+};
+
+function toFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+function isMazeGame(gameType: string): boolean {
+  return gameType === 'maze' || gameType === 'labirinturi';
+}
+
+function sanitizeMetrics(metrics: Record<string, unknown>): Record<string, unknown> {
+  const entries = Object.entries(metrics).slice(0, 20);
+  const safe: Record<string, unknown> = {};
+
+  for (const [key, value] of entries) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      safe[key] = clampInteger(value, 0, 10000);
+      continue;
+    }
+    if (typeof value === 'boolean') {
+      safe[key] = value;
+      continue;
+    }
+    if (typeof value === 'string') {
+      safe[key] = value.slice(0, 64);
+    }
+  }
+
+  return safe;
+}
+
+function sanitizeMazeInput(
+  metrics: Record<string, unknown>,
+  startedAt: Date | null,
+  payloadCorrect?: number,
+  payloadMistakes?: number,
+) {
+  const elapsedSec = startedAt
+    ? Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000))
+    : 0;
+
+  const maxStepsByTime = Math.max(25, elapsedSec * 8 + 40);
+  const maxWallHitsByTime = Math.max(10, elapsedSec * 6 + 20);
+  const maxBonuses = 30;
+
+  const rawSteps = toFiniteNumber(metrics.steps) ?? toFiniteNumber(metrics.progressPoints) ?? 0;
+  const rawWallHits = toFiniteNumber(metrics.wallHits) ?? 0;
+  const rawBonuses = toFiniteNumber(metrics.bonusesCollected) ?? 0;
+  const rawProgressPercent = toFiniteNumber(metrics.progressPercent) ?? 0;
+
+  const steps = clampInteger(rawSteps, 0, maxStepsByTime);
+  const wallHits = clampInteger(rawWallHits, 0, maxWallHitsByTime);
+  const bonusesCollected = clampInteger(rawBonuses, 0, maxBonuses);
+  const progressPercent = clampInteger(rawProgressPercent, 0, 100);
+
+  const computedCorrect = clampInteger(steps + bonusesCollected * 4, 0, maxStepsByTime + maxBonuses * 4);
+  const computedMistakes = wallHits;
+
+  const correctAnswers = clampInteger(
+    payloadCorrect ?? computedCorrect,
+    0,
+    maxStepsByTime + maxBonuses * 4,
+  );
+
+  const mistakes = clampInteger(
+    payloadMistakes ?? computedMistakes,
+    0,
+    maxWallHitsByTime,
+  );
+
+  const normalizedMetrics: Record<string, unknown> = {
+    steps,
+    wallHits,
+    bonusesCollected,
+    progressPercent,
+  };
+
+  if (typeof metrics.usedCheckpoint === 'boolean') {
+    normalizedMetrics.usedCheckpoint = metrics.usedCheckpoint;
+  }
+
+  const suspicious =
+    rawSteps > maxStepsByTime ||
+    rawWallHits > maxWallHitsByTime ||
+    rawBonuses > maxBonuses ||
+    rawProgressPercent > 100;
+
+  return { correctAnswers, mistakes, metrics: normalizedMetrics, suspicious };
+}
+
+function normalizeScoreInput(
+  payload: GenericProgressPayload | LegacyProgressPayload,
+  gameType: string,
+  startedAt: Date | null,
+) {
+  const rawMetrics = 'metrics' in payload && payload.metrics ? payload.metrics : {};
+  const payloadCorrect = toFiniteNumber(payload.correctAnswers);
+  const payloadMistakes = toFiniteNumber(payload.mistakes);
+
+  if (isMazeGame(gameType)) {
+    return sanitizeMazeInput(rawMetrics, startedAt, payloadCorrect, payloadMistakes);
+  }
+
+  const metrics = sanitizeMetrics(rawMetrics);
+
+  const metricsCorrect =
+    toFiniteNumber(metrics.correctAnswers) ??
+    toFiniteNumber(metrics.progressPoints) ??
+    toFiniteNumber(metrics.steps);
+
+  const metricsMistakes =
+    toFiniteNumber(metrics.mistakes) ??
+    toFiniteNumber(metrics.wallHits);
+
+  const correctAnswers = clampInteger(payloadCorrect ?? metricsCorrect ?? 0, 0, 10000);
+  const mistakes = clampInteger(payloadMistakes ?? metricsMistakes ?? 0, 0, 10000);
+
+  return { correctAnswers, mistakes, metrics, suspicious: false };
+}
+
+function isProgressRateLimited(socketId: string): boolean {
+  const now = Date.now();
+  const current = progressRateState.get(socketId);
+
+  if (!current || now - current.windowStart >= PROGRESS_RATE_WINDOW_MS) {
+    progressRateState.set(socketId, { windowStart: now, count: 1 });
+    return false;
+  }
+
+  if (current.count >= PROGRESS_RATE_MAX_PER_WINDOW) {
+    return true;
+  }
+
+  current.count += 1;
+  progressRateState.set(socketId, current);
+  return false;
+}
 
 export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: string) {
   // ─── Join Match ─────────────────────────────────────────────────────────────
@@ -85,7 +242,12 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           await prisma.match.update({ where: { id: matchId }, data: { status: 'active', startedAt: new Date() } });
           io.to(room).emit(SOCKET_EVENTS.MATCH_START, { startedAt: new Date() });
           logger.info(`[COUNTDOWN] MATCH_START emis room=${room}`);
-          const rules = gameRegistry.getRules(match.gameType) ?? gameRegistry.getRules('integrame')!;
+          const rules = gameRegistry.getRules(match.gameType);
+          if (!rules) {
+            logger.error('[COUNTDOWN] game rules missing for match', { matchId, gameType: match.gameType });
+            io.to(room).emit(SOCKET_EVENTS.ERROR, { message: 'Game rules not found' });
+            return;
+          }
           matchTimers[matchId] = setTimeout(() => autoFinishMatch(io, matchId, room), rules.timeLimit * 1000);
         }
       }, 1000);
@@ -99,13 +261,34 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
   // ─── Player Progress ─────────────────────────────────────────────────────────
   socket.on(
     SOCKET_EVENTS.PLAYER_PROGRESS,
-    async ({ matchId, correctAnswers, mistakes }: { matchId: string; correctAnswers: number; mistakes: number }) => {
+    async (payload: GenericProgressPayload | LegacyProgressPayload) => {
       try {
+        if (isProgressRateLimited(socket.id)) {
+          logger.warn('[PLAYER_PROGRESS] rate limited', { userId, socketId: socket.id, matchId: payload.matchId });
+          return;
+        }
+
+        const matchId = payload.matchId;
+
         const match = await prisma.match.findUnique({
           where: { id: matchId },
           include: { players: true },
         });
         if (!match || match.status !== 'active') return;
+
+        const { correctAnswers, mistakes, metrics, suspicious } = normalizeScoreInput(
+          payload,
+          match.gameType,
+          match.startedAt,
+        );
+
+        if (suspicious) {
+          logger.warn('[PLAYER_PROGRESS] suspicious metrics clamped', {
+            userId,
+            matchId,
+            gameType: match.gameType,
+          });
+        }
 
         const liveScore = gameRegistry.calculateLiveScore(match.gameType, correctAnswers, mistakes);
 
@@ -123,6 +306,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           userId,
           correctAnswers,
           mistakes,
+          metrics,
           liveScore,
           players: updated?.players,
         });
@@ -135,13 +319,29 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
   // ─── Player Finish ───────────────────────────────────────────────────────────
   socket.on(
     SOCKET_EVENTS.PLAYER_FINISH,
-    async ({ matchId, correctAnswers, mistakes }: { matchId: string; correctAnswers: number; mistakes: number }) => {
+    async (payload: GenericProgressPayload | LegacyProgressPayload) => {
       try {
+        const matchId = payload.matchId;
+
         const match = await prisma.match.findUnique({
           where: { id: matchId },
           include: { players: { include: { user: true } } },
         });
         if (!match || match.status !== 'active') return;
+
+        const { correctAnswers, mistakes, metrics, suspicious } = normalizeScoreInput(
+          payload,
+          match.gameType,
+          match.startedAt,
+        );
+
+        if (suspicious) {
+          logger.warn('[PLAYER_FINISH] suspicious metrics clamped', {
+            userId,
+            matchId,
+            gameType: match.gameType,
+          });
+        }
 
         const finishedPlayers = match.players.filter((p: any) => p.finishedAt);
         const isFirst = finishedPlayers.length === 0;
@@ -168,6 +368,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           userId,
           correctAnswers,
           mistakes,
+          metrics,
           liveScore: finalScore,
           finished: true,
           players: updated?.players,
@@ -196,6 +397,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
   // ─── Leave Match (click inapoi / navigare explicita) ───────────────────────
   socket.on(SOCKET_EVENTS.LEAVE_MATCH, ({ matchId }: { matchId: string }) => {
     socketMatchMap.delete(socket.id);
+    progressRateState.delete(socket.id);
     socket.leave(`match:${matchId}`);
     // Daca meciul e activ, playerul care pleaca forfeiaza
     handlePlayerLeft(io, userId, matchId).catch(() => {});
@@ -205,6 +407,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
   socket.on('disconnect', () => {
     const matchId = socketMatchMap.get(socket.id);
     socketMatchMap.delete(socket.id);
+    progressRateState.delete(socket.id);
     if (matchId) {
       handlePlayerLeft(io, userId, matchId).catch(() => {});
     }

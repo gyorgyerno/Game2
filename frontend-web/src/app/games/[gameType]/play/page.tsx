@@ -16,6 +16,7 @@ import { GAME_RULES, Match, MatchPlayer, MAX_PLAYERS_PER_LEVEL, GameLevel } from
 import { SAMPLE_INTEGRAMA } from '@/lib/puzzles';
 import type { CrosswordPuzzle } from '@/components/game/CrosswordGrid';
 import clsx from 'clsx';
+import { isLabyrinthGameType, toCanonicalGameType } from '@/games/registry';
 
 interface PageProps {
   params: { gameType: string };
@@ -23,9 +24,30 @@ interface PageProps {
 
 function GamePlayPageInner({ params }: PageProps) {
   const { gameType } = params;
+  const canonicalGameType = toCanonicalGameType(gameType);
+  const isLabyrinth = isLabyrinthGameType(gameType);
+  const accent = isLabyrinth
+    ? {
+      bgSoft: 'bg-emerald-100',
+      borderSoft: 'border-emerald-300',
+      textStrong: 'text-emerald-700',
+      textDim: 'text-emerald-600',
+      countdownMain: 'text-emerald-600',
+      countdownWarn: 'text-orange-500',
+    }
+    : {
+      bgSoft: 'bg-violet-100',
+      borderSoft: 'border-violet-300',
+      textStrong: 'text-violet-700',
+      textDim: 'text-violet-500',
+      countdownMain: 'text-violet-600',
+      countdownWarn: 'text-red-500',
+    };
   const router = useRouter();
   const searchParams = useSearchParams();
   const matchId = searchParams.get('matchId') || '';
+  const mode = searchParams.get('mode') || '';
+  const allowInvite = mode === 'friends';
   const isAI = searchParams.get('ai') === '1';
   const aiLevel = parseInt(searchParams.get('level') || '1', 10);
   const aiTheme = searchParams.get('theme') || 'general';
@@ -44,9 +66,10 @@ function GamePlayPageInner({ params }: PageProps) {
   const [aiPuzzle, setAiPuzzle] = useState<CrosswordPuzzle | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [lastReaction, setLastReaction] = useState<{ userId: string; emoji: string; fromMe: boolean } | null>(null);
+  const [latestMetrics, setLatestMetrics] = useState<Record<string, unknown> | undefined>(undefined);
 
   const puzzle: CrosswordPuzzle = aiPuzzle || SAMPLE_INTEGRAMA;
-  const rules = GAME_RULES[gameType] || GAME_RULES['integrame'];
+  const rules = GAME_RULES[canonicalGameType] || GAME_RULES['integrame'];
   // Calculeaza timpurile ramas corect dupa refresh, pe baza match.startedAt de pe server
   const initialGameSeconds = useMemo(() => {
     if (!started || !match?.startedAt) return rules.timeLimit;
@@ -170,18 +193,20 @@ function GamePlayPageInner({ params }: PageProps) {
     };
   }, [matchId, token, user?.id]);
 
-  function handleProgress(correctAnswers: number, mistakes: number) {
+  function handleProgress(correctAnswers: number, mistakes: number, metrics?: Record<string, unknown>) {
     setCorrectWords(correctAnswers);
     setWrongWords(mistakes);
+    if (metrics) setLatestMetrics(metrics);
     if (!matchId) return;
     const socket = getSocket();
-    socket.emit(SOCKET_EVENTS.PLAYER_PROGRESS, { matchId, correctAnswers, mistakes });
+    socket.emit(SOCKET_EVENTS.PLAYER_PROGRESS, { matchId, correctAnswers, mistakes, metrics });
   }
 
-  function handleFinish(correctAnswers: number, mistakes: number) {
+  function handleFinish(correctAnswers: number, mistakes: number, metrics?: Record<string, unknown>) {
+    if (metrics) setLatestMetrics(metrics);
     if (!matchId) return;
     const socket = getSocket();
-    socket.emit(SOCKET_EVENTS.PLAYER_FINISH, { matchId, correctAnswers, mistakes });
+    socket.emit(SOCKET_EVENTS.PLAYER_FINISH, { matchId, correctAnswers, mistakes, metrics });
   }
 
   function handleTimeExpire() {
@@ -191,6 +216,7 @@ function GamePlayPageInner({ params }: PageProps) {
       matchId,
       correctAnswers: correctWords,
       mistakes: wrongWords,
+      metrics: latestMetrics,
     });
   }
 
@@ -208,7 +234,7 @@ function GamePlayPageInner({ params }: PageProps) {
             <div className="text-5xl mb-4">🤖</div>
             <h2 className="text-xl font-extrabold text-gray-900 mb-2">Se generează puzzle-ul AI</h2>
             <p className="text-gray-400 text-sm">O secundă, se creează întrebările...</p>
-            <div className="mt-5 w-8 h-8 border-4 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto" />
+            <div className={`mt-5 w-8 h-8 border-4 border-t-transparent rounded-full animate-spin mx-auto ${isLabyrinth ? 'border-emerald-500' : 'border-violet-500'}`} />
           </div>
         </div>
       )}
@@ -221,7 +247,7 @@ function GamePlayPageInner({ params }: PageProps) {
             <h2 className="text-2xl font-extrabold text-gray-900 mb-2">Ai câștigat!</h2>
             <p className="text-gray-500 text-sm mb-1">Adversarul a abandonat jocul.</p>
             <p className="text-gray-400 text-xs">Se calculează rezultatele...</p>
-            <div className="mt-5 w-8 h-8 border-4 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto" />
+            <div className={`mt-5 w-8 h-8 border-4 border-t-transparent rounded-full animate-spin mx-auto ${isLabyrinth ? 'border-emerald-500' : 'border-violet-500'}`} />
           </div>
         </div>
       )}
@@ -242,6 +268,7 @@ function GamePlayPageInner({ params }: PageProps) {
         gameType={gameType}
         level={level}
         myUserId={user?.id || ''}
+        allowInvite={allowInvite}
       />
 
       {/* Main content */}
@@ -252,7 +279,7 @@ function GamePlayPageInner({ params }: PageProps) {
             <div className="text-center">
               <div className={clsx(
                 'text-[120px] font-black leading-none',
-                countdown <= 2 ? 'text-red-500' : 'text-violet-600'
+                countdown <= 2 ? accent.countdownWarn : accent.countdownMain
               )}>
                 {countdown === 0 ? '🚀' : countdown}
               </div>
@@ -270,8 +297,13 @@ function GamePlayPageInner({ params }: PageProps) {
           ) : match?.status === 'waiting' ? (
             <div className="flex flex-col items-center gap-3">
               {isAI && (
-                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-violet-100 border border-violet-300 text-violet-700 text-sm font-semibold">
+                <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${accent.bgSoft} ${accent.borderSoft} ${accent.textStrong}`}>
                   🤖 Puzzle generat de AI – întrebări unice!
+                </div>
+              )}
+              {isLabyrinth && (
+                <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${accent.bgSoft} ${accent.borderSoft} ${accent.textStrong}`}>
+                  🌀 Labirinturi: controlează bila cu săgeți, swipe sau drag
                 </div>
               )}
               <p className="text-gray-500 text-sm font-medium">
@@ -283,7 +315,7 @@ function GamePlayPageInner({ params }: PageProps) {
                 🎯 Nivel {match.level} · max {maxPlayers} jucători · celălalt jucător trebuie să selecteze același nivel
               </div>
               <p className="text-gray-400 text-xs">Meciul pornește automat când sunt toți prezenți</p>
-              {match.players.length < maxPlayers && (
+              {allowInvite && match.players.length < maxPlayers && (
                 <button
                   onClick={() => {
                     const url = window.location.href;
@@ -295,7 +327,7 @@ function GamePlayPageInner({ params }: PageProps) {
                   className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all border ${
                     linkCopied
                       ? 'bg-green-50 border-green-300 text-green-700'
-                      : 'bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100'
+                      : `${accent.bgSoft} ${accent.borderSoft} ${accent.textStrong}`
                   }`}
                 >
                   {linkCopied ? (
@@ -313,6 +345,7 @@ function GamePlayPageInner({ params }: PageProps) {
           gameType={gameType}
           started={started}
           finished={finished}
+          level={level}
           puzzle={puzzle}
           onProgress={handleProgress}
           onFinish={handleFinish}

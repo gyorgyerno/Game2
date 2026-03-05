@@ -11,6 +11,8 @@ export interface GamePlayProps {
   started: boolean;
   /** Jocul s-a terminat (timer expirat sau finalizat) */
   finished: boolean;
+  /** Nivelul meciului curent (1..5) */
+  level?: number;
   /**
    * Puzzle-ul curent (venit din backend/AI sau fallback local).
    * Tipul CrosswordPuzzle este reutilizat deocamdată — jocuri
@@ -21,10 +23,10 @@ export interface GamePlayProps {
    * Apelat de fiecare dată când jucătorul face progres
    * (răspuns corect sau greșit).
    */
-  onProgress: (correctAnswers: number, mistakes: number) => void;
+  onProgress: (correctAnswers: number, mistakes: number, metrics?: Record<string, unknown>) => void;
   /**
    * Apelat când jucătorul a terminat toate întrebările / a ieșit
    * din joc (nu și când expiră timer-ul — acela e gestionat de pagină).
    */
-  onFinish: (correctAnswers: number, mistakes: number) => void;
+  onFinish: (correctAnswers: number, mistakes: number, metrics?: Record<string, unknown>) => void;
 }

@@ -85,6 +85,7 @@ const matchesApi = {
   getMatch: (id: string) => api.get(`/matches/${id}`),
   getHistory: () => api.get('/matches/history/me'),
   joinMatch: (id: string) => api.post(`/matches/${id}/join`, {}),
+  declineRandomMatch: (id: string) => api.post(`/matches/${id}/decline-random`, {}),
 };
 
 export { matchesApi };
@@ -97,10 +98,11 @@ export const leaderboardApi = {
 
 // ─── Invites ─────────────────────────────────────────────────────────────────
 export const invitesApi = {
-  create: (data: { gameType: string; level: number; matchId?: string }) =>
+  create: (data: { gameType: string; level: number; matchId?: string; ttlSeconds?: number; isAI?: boolean; aiTheme?: string }) =>
     api.post('/invites', data),
+  getActiveByMatch: (matchId: string) => api.get(`/invites/match/${matchId}/active`),
   get: (code: string) => api.get(`/invites/${code}`),
-  accept: (code: string) => api.post(`/invites/${code}/accept`),
+  accept: (code: string, data?: { aiTheme?: string; isAI?: boolean }) => api.post(`/invites/${code}/accept`, data || {}),
 };
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -109,6 +111,10 @@ export const statsApi = {
     api.get('/stats/me', { params: { gameType, level } }),
   getUserStats: (userId: string, gameType?: string, level?: number) =>
     api.get(`/stats/${userId}`, { params: { gameType, level } }),
+  getMazeSoloProgress: () =>
+    api.get('/stats/solo/maze'),
+  completeMazeSoloLevel: (level: number, score: number) =>
+    api.post('/stats/solo/maze/complete', { level, score }),
 };
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
@@ -128,4 +134,9 @@ export const friendsApi = {
   requests:       ()                 => api.get('/friends/requests'),
   accept:         (id: string)       => api.post(`/friends/${id}/accept`),
   remove:         (id: string)       => api.delete(`/friends/${id}`),
+};
+
+// ─── Games catalog ───────────────────────────────────────────────────────────
+export const gamesApi = {
+  getAll: () => api.get('/games'),
 };

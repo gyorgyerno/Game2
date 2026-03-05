@@ -7,11 +7,11 @@ import { useAuthStore } from '@/store/auth';
 import { statsApi, usersApi, friendsApi } from '@/lib/api';
 import { UserGameStats } from '@integrame/shared';
 import Navbar from '@/components/Navbar';
-
-const GAMES = ['integrame', 'slogane'];
+import { useGamesCatalog } from '@/games/useGamesCatalog';
 
 export default function ProfilePage() {
   const router = useRouter();
+  const games = useGamesCatalog();
   const { user, token, fetchMe, _hasHydrated } = useAuthStore();
   const [stats, setStats] = useState<UserGameStats[]>([]);
   const [selectedGame, setSelectedGame] = useState('integrame');
@@ -27,15 +27,37 @@ export default function ProfilePage() {
   const [friendSearch, setFriendSearch] = useState('');
   const [friendMsg, setFriendMsg] = useState('');
   const [friendLoading, setFriendLoading] = useState(false);
+  const [mazeSoloCompleted, setMazeSoloCompleted] = useState<number[]>([]);
+  const [mazeSoloBestScores, setMazeSoloBestScores] = useState<Record<number, number>>({});
 
   useEffect(() => {
     if (!_hasHydrated) return;
     if (!token) { router.push('/login'); return; }
     fetchMe();
     statsApi.getMyStats().then((r) => setStats(r.data)).catch(() => {});
+    statsApi.getMazeSoloProgress().then((r) => {
+      const completed = Array.isArray(r.data?.completedLevels) ? (r.data.completedLevels as number[]) : [];
+      const entries = Array.isArray(r.data?.entries) ? r.data.entries : [];
+      const best: Record<number, number> = {};
+      entries.forEach((entry: any) => {
+        if (typeof entry.level === 'number') {
+          best[entry.level] = typeof entry.bestScore === 'number' ? entry.bestScore : 0;
+        }
+      });
+      setMazeSoloCompleted(completed);
+      setMazeSoloBestScores(best);
+    }).catch(() => {});
     friendsApi.list().then((r) => setFriends(r.data)).catch(() => {});
     friendsApi.requests().then((r) => setFriendRequests(r.data)).catch(() => {});
   }, [_hasHydrated, token]);
+
+  useEffect(() => {
+    if (games.length === 0) return;
+    const ids = games.map((game) => game.id);
+    if (!ids.includes(selectedGame)) {
+      setSelectedGame(ids[0] || 'integrame');
+    }
+  }, [games, selectedGame]);
 
   async function refreshFriends() {
     friendsApi.list().then((r) => setFriends(r.data)).catch(() => {});
@@ -139,13 +161,13 @@ export default function ProfilePage() {
 
         {/* Game selector */}
         <div className="flex gap-2">
-          {GAMES.map((g) => (
+          {games.map((game) => (
             <button
-              key={g}
-              onClick={() => setSelectedGame(g)}
-              className={selectedGame === g ? 'btn-primary text-sm' : 'btn-outline text-sm'}
+              key={game.id}
+              onClick={() => setSelectedGame(game.id)}
+              className={selectedGame === game.id ? 'btn-primary text-sm' : 'btn-outline text-sm'}
             >
-              {g}
+              {game.emoji} {game.label}
             </button>
           ))}
         </div>
@@ -188,6 +210,31 @@ export default function ProfilePage() {
             ))}
           </div>
         )}
+
+        {/* Labirinturi Solo progress */}
+        <div className="card">
+          <h2 className="text-lg font-bold mb-4">🌀 Labirinturi Solo</h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Progres sincronizat pe cont: {mazeSoloCompleted.length}/5 niveluri completate
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+            {[1, 2, 3, 4, 5].map((level) => {
+              const done = mazeSoloCompleted.includes(level);
+              return (
+                <div key={level} className={`rounded-xl border p-3 text-center ${done ? 'border-emerald-500/50 bg-emerald-900/20' : 'border-slate-700 bg-slate-800/50'}`}>
+                  <div className="text-sm text-slate-300 font-semibold">Nivel {level}</div>
+                  <div className={`text-xs mt-1 font-medium ${done ? 'text-emerald-300' : 'text-slate-500'}`}>
+                    {done ? 'Completat' : 'Necompletat'}
+                  </div>
+                  <div className="text-[11px] mt-2 text-slate-400">
+                    Best: {mazeSoloBestScores[level] ?? 0}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Prieteni */}
         <div className="card space-y-4">
           <h2 className="text-lg font-bold">👥 Prieteni</h2>

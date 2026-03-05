@@ -8,6 +8,10 @@ import { MAX_PLAYERS_PER_LEVEL, GameLevel } from '@integrame/shared';
 
 const router = Router();
 
+function toDbGameType(gameType: string): string {
+  return gameType === 'labirinturi' ? 'maze' : gameType;
+}
+
 // POST /api/matches/find-or-create  – matchmaking
 router.post('/find-or-create', requireAuth, async (req: AuthRequest & import('express').Request, res: Response) => {
   const schema = z.object({
@@ -19,12 +23,13 @@ router.post('/find-or-create', requireAuth, async (req: AuthRequest & import('ex
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const { gameType, level, isAI } = parsed.data as { gameType: string; level: GameLevel; isAI: boolean };
+  const dbGameType = toDbGameType(gameType);
   const maxPlayers = MAX_PLAYERS_PER_LEVEL[level];
 
   // Look for an open match of the same type (AI vs non-AI separate)
   const existing = await prisma.match.findFirst({
     where: {
-      gameType,
+      gameType: dbGameType,
       level,
       isAI,
       status: 'waiting',
@@ -46,7 +51,7 @@ router.post('/find-or-create', requireAuth, async (req: AuthRequest & import('ex
   const match = await prisma.match.create({
     data: {
       id: uuidv4(),
-      gameType,
+      gameType: dbGameType,
       level,
       isAI,
       status: 'waiting',
@@ -87,6 +92,35 @@ router.post('/:id/join', requireAuth, async (req: AuthRequest & import('express'
   });
   logger.info(`[join-direct] user=${req.userId} joined match=${matchId} players=${updated?.players.length}`);
   return res.json(updated);
+});
+
+// POST /api/matches/:id/decline-random – leave a random matched waiting room before start
+router.post('/:id/decline-random', requireAuth, async (req: AuthRequest & import('express').Request, res: Response) => {
+  const matchId = (req as import('express').Request).params['id'];
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { players: true, invites: true },
+  });
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.status !== 'waiting') return res.status(409).json({ error: 'Match already started' });
+
+  const wasInMatch = match.players.some((p) => p.userId === req.userId);
+  if (!wasInMatch) return res.json({ ok: true });
+
+  await prisma.matchPlayer.deleteMany({
+    where: { matchId, userId: req.userId! },
+  });
+
+  const remainingPlayers = await prisma.matchPlayer.count({ where: { matchId } });
+
+  if (remainingPlayers === 0 && match.invites.length === 0) {
+    await prisma.match.delete({ where: { id: matchId } }).catch(() => {});
+    logger.info(`[decline-random] user=${req.userId} removed from match=${matchId}; match deleted`);
+    return res.json({ ok: true, deleted: true });
+  }
+
+  logger.info(`[decline-random] user=${req.userId} removed from match=${matchId}; remaining=${remainingPlayers}`);
+  return res.json({ ok: true, deleted: false });
 });
 
 // GET /api/matches/:id

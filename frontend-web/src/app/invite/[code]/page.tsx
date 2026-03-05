@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { UserPlus, Loader2, CheckCircle2 } from 'lucide-react';
 import { invitesApi } from '@/lib/api';
@@ -13,7 +13,8 @@ interface PageProps {
 export default function InvitePage({ params }: PageProps) {
   const { code } = params;
   const router = useRouter();
-  const { token, user } = useAuthStore();
+  const searchParams = useSearchParams();
+  const { token, _hasHydrated } = useAuthStore();
   const [invite, setInvite] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [accepting, setAccepting] = useState(false);
@@ -33,7 +34,9 @@ export default function InvitePage({ params }: PageProps) {
     }
     setAccepting(true);
     try {
-      const { data } = await invitesApi.accept(code);
+      const isAI = searchParams.get('ai') === '1';
+      const aiTheme = searchParams.get('theme') || undefined;
+      const { data } = await invitesApi.accept(code, { isAI, aiTheme });
       router.push(data.redirectTo);
     } catch (e: any) {
       setError(e.response?.data?.error || 'Eroare la acceptare');
@@ -42,7 +45,7 @@ export default function InvitePage({ params }: PageProps) {
     }
   }
 
-  if (loading) return (
+  if (!_hasHydrated || loading) return (
     <div className="min-h-screen bg-white flex items-center justify-center">
       <Loader2 className="w-8 h-8 animate-spin text-violet-600" />
     </div>

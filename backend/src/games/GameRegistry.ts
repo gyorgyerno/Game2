@@ -7,7 +7,7 @@
 
 import { IGame } from './IGame';
 import { IntegrameGame } from './integrame/IntegrameGame';
-import { MazeGame } from './maze/MazeGame';
+import { LabirinturiGame, MazeGame } from './maze/MazeGame';
 
 class GameRegistry {
   private games: Map<string, IGame> = new Map();
@@ -66,3 +66,4 @@ export const gameRegistry = new GameRegistry();
 // Adaugă joc nou: gameRegistry.register(MyNewGame);
 gameRegistry.register(IntegrameGame);
 gameRegistry.register(MazeGame);
+gameRegistry.register(LabirinturiGame);
