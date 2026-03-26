@@ -286,8 +286,13 @@ export default function DashboardPage() {
 
   // Level unlock logic: each level requires 5 wins at the previous level
   const WINS_TO_UNLOCK = 5;
+  // 'labirinturi' și 'maze' sunt același joc — stats pot fi salvate sub oricare
+  const matchesGame = (statGameType: string) =>
+    statGameType === selectedGame ||
+    (selectedGame === 'labirinturi' && statGameType === 'maze') ||
+    (selectedGame === 'maze' && statGameType === 'labirinturi');
   const levelWins = (lvl: number) =>
-    stats.find((s) => s.gameType === selectedGame && s.level === lvl)?.wins ?? 0;
+    stats.find((s) => matchesGame(s.gameType) && s.level === lvl)?.wins ?? 0;
   const unlockedLevels = new Set<number>([1]);
   for (let lvl = 2; lvl <= 5; lvl++) {
     if (unlockedLevels.has(lvl - 1) && levelWins(lvl - 1) >= WINS_TO_UNLOCK) {

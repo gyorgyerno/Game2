@@ -21,6 +21,8 @@ model User {
   xp           Int      @default(0)
   league       String   @default("bronze")
   referralCode String?
+  isBanned     Boolean  @default(false)
+  lastIp       String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -266,4 +268,54 @@ model BotConfig {
   updatedAt           DateTime @updatedAt
 
   @@map("bot_config")
+}
+
+// ─── SystemConfig ─────────────────────────────────────────────────────────────
+// Stochează parametri globali editabili din admin (ELO, XP, ligi).
+// key: 'elo' | 'xp' | 'league'  — value: JSON string cu câmpurile respective.
+// Câmpurile lipsă = folosesc default-urile din cod (shared/).
+model SystemConfig {
+  key       String   @id
+  value     String   // JSON string
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_configs")
+}
+
+// ─── GameScoringConfig ────────────────────────────────────────────────────────
+// Suprascrie regulile de scoring din cod pentru un joc + nivel specific.
+// level = null înseamnă: se aplică la toate nivelele jocului (override de bază).
+// level = N: override specific pentru nivelul N (ia prioritate față de cel cu level=null).
+// Câmpurile null înseamnă "folosește default-ul din cod".
+// Modificările NU afectează meciurile deja jucate (scorurile sunt salvate la final de meci).
+model GameScoringConfig {
+  id                 String   @id @default(uuid())
+  gameType           String
+  level              Int?     // null = toate nivelele
+  pointsPerCorrect   Int?
+  pointsPerMistake   Int?
+  bonusFirstFinisher Int?
+  bonusCompletion    Int?
+  timeLimitSeconds   Int?
+  forfeitBonus       Int?
+  updatedBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([gameType, level], name: "gameType_level")
+  @@index([gameType])
+  @@map("game_scoring_configs")
+}
+
+// ─── BannedIP ─────────────────────────────────────────────────────────────────
+model BannedIP {
+  id           String   @id @default(uuid())
+  ip           String   @unique
+  reason       String   @default("ban_user")
+  bannedUserId String?
+  createdAt    DateTime @default(now())
+
+  @@map("banned_ips")
 }

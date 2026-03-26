@@ -6,6 +6,7 @@ import Link from 'next/link';
 
 const NAV = [
   { href: '/admin', label: 'Dashboard', icon: '📊' },
+  { href: '/admin/stats', label: 'Statistici', icon: '📈' },
   { href: '/admin/games', label: 'Jocuri', icon: '🕹️' },
   { href: '/admin/simulated-players', label: 'Simulated AI', icon: '🤖' },
   { href: '/admin/ghost-runs', label: 'Ghost Runs', icon: '👻' },
@@ -13,6 +14,7 @@ const NAV = [
   { href: '/admin/matches', label: 'Meciuri', icon: '🎮' },
   { href: '/admin/invites', label: 'Invite Codes', icon: '🎫' },
   { href: '/admin/logs', label: 'Loguri', icon: '📋' },
+  { href: '/admin/settings', label: 'Settings', icon: '⚙️' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

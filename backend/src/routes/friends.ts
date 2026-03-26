@@ -65,6 +65,15 @@ router.get('/requests', requireAuth, async (req: AuthRequest, res: Response) => 
   return res.json(requests);
 });
 
+// ─── GET /api/friends/sent  (cereri trimise, pending) ─────────────────────────
+router.get('/sent', requireAuth, async (req: AuthRequest, res: Response) => {
+  const sent = await prisma.friendship.findMany({
+    where: { senderId: req.userId!, status: 'pending' },
+    include: { receiver: { select: { id: true, username: true, avatarUrl: true, rating: true, league: true } } },
+  });
+  return res.json(sent);
+});
+
 // ─── POST /api/friends/:id/accept ─────────────────────────────────────────────
 router.post('/:id/accept', requireAuth, async (req: AuthRequest & import('express').Request, res: Response) => {
   const { id } = (req as import('express').Request).params;

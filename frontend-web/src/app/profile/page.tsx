@@ -22,8 +22,10 @@ export default function ProfilePage() {
   // Friends
   type Friend = { id: string; username: string; avatarUrl?: string; rating: number; league: string };
   type FriendRequest = { id: string; sender: Friend };
+  type SentRequest = { id: string; receiver: Friend };
   const [friends, setFriends] = useState<Friend[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+  const [sentRequests, setSentRequests] = useState<SentRequest[]>([]);
   const [friendSearch, setFriendSearch] = useState('');
   const [friendMsg, setFriendMsg] = useState('');
   const [friendLoading, setFriendLoading] = useState(false);
@@ -49,6 +51,7 @@ export default function ProfilePage() {
     }).catch(() => {});
     friendsApi.list().then((r) => setFriends(r.data)).catch(() => {});
     friendsApi.requests().then((r) => setFriendRequests(r.data)).catch(() => {});
+    friendsApi.sent().then((r) => setSentRequests(r.data)).catch(() => {});
   }, [_hasHydrated, token]);
 
   useEffect(() => {
@@ -62,6 +65,7 @@ export default function ProfilePage() {
   async function refreshFriends() {
     friendsApi.list().then((r) => setFriends(r.data)).catch(() => {});
     friendsApi.requests().then((r) => setFriendRequests(r.data)).catch(() => {});
+    friendsApi.sent().then((r) => setSentRequests(r.data)).catch(() => {});
   }
 
   async function handleSendRequest() {
@@ -72,6 +76,7 @@ export default function ProfilePage() {
       await friendsApi.sendRequest(friendSearch.trim());
       setFriendMsg('Cerere trimisă!');
       setFriendSearch('');
+      await refreshFriends();
     } catch (e: any) {
       setFriendMsg(e?.response?.data?.error || 'Eroare la trimitere.');
     } finally {
@@ -255,7 +260,29 @@ export default function ProfilePage() {
           </div>
           {friendMsg && <p className="text-sm text-brand-400">{friendMsg}</p>}
 
-          {/* Pending requests */}
+          {/* Cereri trimise (pending outgoing) */}
+          <div>
+            <h3 className="text-sm font-semibold text-slate-400 mb-2">⏳ Cereri trimise în așteptare ({sentRequests.length})</h3>
+            {sentRequests.length === 0 ? (
+              <p className="text-slate-600 text-xs italic px-1">Nicio cerere în așteptare. Când trimiți o cerere, apare aici până când celălalt user o acceptă.</p>
+            ) : (
+              <div className="space-y-2">
+                {sentRequests.map(({ id, receiver }) => (
+                  <div key={id} className="flex items-center gap-3 bg-slate-800/60 rounded-xl px-3 py-2">
+                    <img src={receiver.avatarUrl || `https://api.dicebear.com/8.x/bottts/svg?seed=${receiver.username}`} alt={receiver.username} className="w-8 h-8 rounded-lg border border-slate-600 object-cover" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{receiver.username}</p>
+                      <p className="text-[11px] text-slate-500">Cerere în așteptare — dispare când acceptă</p>
+                    </div>
+                    <span className="text-xs text-yellow-400/80 bg-yellow-400/10 border border-yellow-400/20 rounded-lg px-2 py-0.5">Pending</span>
+                    <button onClick={() => handleRemove(id)} className="text-xs text-slate-500 hover:text-red-400 transition-colors ml-1">✕ Anulează</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Cereri primite (pending incoming) */}
           {friendRequests.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-slate-400 mb-2">Cereri primite ({friendRequests.length})</h3>

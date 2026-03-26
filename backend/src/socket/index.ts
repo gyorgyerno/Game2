@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
+import prisma from '../prisma';
 import { registerMatchHandlers } from './matchHandler';
 
 export let io: SocketServer;
@@ -14,11 +15,13 @@ export function initSocket(server: HttpServer) {
   });
 
   // Auth middleware
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
     if (!token) return next(new Error('Unauthorized'));
     try {
       const payload = jwt.verify(token as string, config.jwtSecret) as { userId: string };
+      const user = await prisma.user.findUnique({ where: { id: payload.userId } }).catch(() => null);
+      if (user?.isBanned) return next(new Error('Cont suspendat'));
       (socket as any).userId = payload.userId;
       next();
     } catch {

@@ -3,6 +3,25 @@ import logger from '../../logger';
 import { config } from '../../config';
 import { behaviorEngine } from './BehaviorEngine';
 
+// Pool de nume naturale de gameri — folosite pentru ghost players
+// ca să nu fie evident că e bot (în locul formatului Ghost_Nume_a1b2c3)
+const GHOST_NAME_POOL = [
+  'AndroZen', 'CryptoAce', 'VortexOne', 'PixelRun', 'NovaStar',
+  'EchoWulf', 'SkyBlade', 'IronFox', 'StormAce', 'ZeroKing',
+  'NightOwl', 'DawnBolt', 'SwiftClue', 'ColdRun', 'FireMind',
+  'ArcadeRo', 'QuickFox', 'DarkGrid', 'WaveRider', 'PulseHero',
+  'GridMaster', 'ByteWolf', 'CodeRush', 'NetRacer', 'DeltaOne',
+  'OmegaRun', 'PhantomX', 'ShadowAce', 'TurboMind', 'AlphaGrid',
+];
+
+function deriveGhostUsername(playerId: string): string {
+  // Derivă determinist un nume din pool folosind primele 8 hex chars din ID
+  const hash = parseInt(playerId.replace(/-/g, '').slice(0, 8), 16);
+  const baseName = GHOST_NAME_POOL[hash % GHOST_NAME_POOL.length];
+  const numSuffix = (hash % 90) + 10; // 10–99
+  return `${baseName}${numSuffix}`;
+}
+
 type ScheduleFillParams = {
   matchId: string;
   maxPlayers: number;
@@ -120,9 +139,8 @@ class SimulatedMatchOrchestrator {
 
     if (!ghostRun || !ghostRun.player) return null;
 
-    const usernameSuffix = ghostRun.player.id.replace(/-/g, '').slice(0, 6);
     const ghostEmail = `ghost.${ghostRun.player.id}@integrame.local`;
-    const ghostUsername = `Ghost_${ghostRun.player.username}_${usernameSuffix}`.slice(0, 40);
+    const ghostUsername = deriveGhostUsername(ghostRun.player.id);
 
     const ghostUser = await prisma.user.upsert({
       where: { email: ghostEmail },
@@ -185,18 +203,21 @@ class SimulatedMatchOrchestrator {
           orderBy: { createdAt: 'asc' },
         });
 
-    const candidate = [...fallbackCandidates]
-      .sort((left, right) => {
-        const leftDistance = Math.abs((left.aiProfile?.skillLevel ?? 5) - tuning.targetSkillLevel);
-        const rightDistance = Math.abs((right.aiProfile?.skillLevel ?? 5) - tuning.targetSkillLevel);
+    // Grupăm candidații după distanța față de skillLevel țintă și alegem random
+    // din grupul cel mai potrivit — evită să apară mereu același bot
+    const scored = fallbackCandidates.map((c) => ({
+      candidate: c,
+      distance: Math.abs((c.aiProfile?.skillLevel ?? 5) - tuning.targetSkillLevel),
+      prefersGame: c.aiProfile?.preferredGames?.includes(gameType) ? 1 : 0,
+    }));
 
-        if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+    const minDistance = Math.min(...scored.map((s) => s.distance));
+    const bestGroup = scored.filter((s) => s.distance === minDistance);
 
-        const leftPrefersGame = left.aiProfile?.preferredGames?.includes(gameType) ? 1 : 0;
-        const rightPrefersGame = right.aiProfile?.preferredGames?.includes(gameType) ? 1 : 0;
-        return rightPrefersGame - leftPrefersGame;
-      })
-      .at(0);
+    // În cadrul grupului, preferăm cei care au jocul în lista de preferred; randomizare finală
+    const preferredGroup = bestGroup.filter((s) => s.prefersGame === 1);
+    const pool = preferredGroup.length > 0 ? preferredGroup : bestGroup;
+    const candidate = pool[Math.floor(Math.random() * pool.length)]?.candidate ?? null;
 
     if (!candidate) return null;
 

@@ -7,7 +7,17 @@ import prisma from '../prisma';
 import { ratingToLeague } from '@integrame/shared';
 
 const router = Router();
+function getClientIp(req: Request): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) return (Array.isArray(forwarded) ? forwarded[0] : forwarded).split(',')[0].trim();
+  return req.socket.remoteAddress || 'unknown';
+}
 
+async function isIpBanned(ip: string): Promise<boolean> {
+  if (!ip || ip === 'unknown') return false;
+  const entry = await prisma.bannedIP.findUnique({ where: { ip } });
+  return !!entry;
+}
 // ─── Mailer ───────────────────────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
   host: config.smtp.host,
@@ -24,6 +34,9 @@ router.post('/send-otp', async (req: Request, res: Response) => {
   const schema = z.object({ email: z.string().email() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Email invalid' });
+
+  const clientIp = getClientIp(req);
+  if (await isIpBanned(clientIp)) return res.status(403).json({ error: 'Acces blocat.' });
 
   const { email } = parsed.data;
   const otp = generateOTP();
@@ -61,6 +74,9 @@ router.post('/register', async (req: Request, res: Response) => {
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const clientIp = getClientIp(req);
+  if (await isIpBanned(clientIp)) return res.status(403).json({ error: 'Acces blocat.' });
 
   const { email, username, otp, referralCode } = parsed.data;
 
@@ -117,10 +133,17 @@ router.post('/login', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'OTP invalid sau expirat' });
   }
 
+  const clientIp = getClientIp(req);
+  if (await isIpBanned(clientIp)) return res.status(403).json({ error: 'Acces blocat.' });
+
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) return res.status(404).json({ error: 'Utilizatorul nu există. Înregistrează-te.' });
+  if (user.isBanned) return res.status(403).json({ error: 'Contul tău a fost suspendat.' });
 
   await prisma.oTP.delete({ where: { email } });
+
+  // Save last known IP for potential future banning
+  await prisma.user.update({ where: { id: user.id }, data: { lastIp: clientIp } });
 
   const token = jwt.sign({ userId: user.id }, config.jwtSecret, { expiresIn: config.jwtExpiresIn } as jwt.SignOptions);
   return res.json({ token, user: { ...user, league: ratingToLeague(user.rating) } });

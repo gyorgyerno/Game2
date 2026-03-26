@@ -9,6 +9,7 @@ import { config } from '../config';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { asyncHandler } from '../middleware/errorHandler';
 import { gameRegistry } from '../games/GameRegistry';
+import { systemConfigService, DEFAULT_ELO, DEFAULT_XP, DEFAULT_LEAGUE, ELO_LIMITS, XP_LIMITS, LEAGUE_LIMITS } from '../services/SystemConfigService';
 import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/SimulatedMatchOrchestrator';
 import { activityFeedGenerator } from '../services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from '../services/simulatedPlayers/BotChatGenerator';
@@ -74,6 +75,170 @@ router.get('/stats', adminAuth, asyncHandler(async (_req: AdminRequest, res: Res
     }),
   ]);
   res.json({ totalUsers, totalMatches, activeMatches, totalInvites, recentUsers });
+}));
+
+// ─── GET /api/admin/stats/overview ───────────────────────────────────────────
+router.get('/stats/overview', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const period = (req.query as { period?: string }).period ?? 'day';
+
+  let since: Date;
+  const now = new Date();
+  if (period === 'week') {
+    since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  } else if (period === 'month') {
+    since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  } else {
+    // day
+    since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  }
+
+  // ── Useri totali vs. noi in perioada ──────────────────────────────────────
+  const [totalUsers, newUsers, totalRealUsers, totalBots, totalGhosts] = await Promise.all([
+    prisma.user.count(),
+    prisma.user.count({ where: { createdAt: { gte: since }, userType: 'REAL' } }),
+    prisma.user.count({ where: { userType: 'REAL' } }),
+    prisma.user.count({ where: { userType: 'SIMULATED' } }),
+    prisma.user.count({ where: { userType: 'GHOST' } }),
+  ]);
+
+  // ── Meciuri in perioada ────────────────────────────────────────────────────
+  const matchesInPeriod = await prisma.match.findMany({
+    where: { createdAt: { gte: since }, status: 'finished' },
+    select: { gameType: true, level: true, isAI: true },
+  });
+
+  const matchesTotal = matchesInPeriod.length;
+  const matchesSolo = matchesInPeriod.filter(m => m.isAI).length;
+  const matchesGroup = matchesInPeriod.filter(m => !m.isAI).length;
+
+  // meciuri per joc
+  const perGame: Record<string, number> = {};
+  for (const m of matchesInPeriod) {
+    perGame[m.gameType] = (perGame[m.gameType] ?? 0) + 1;
+  }
+
+  // meciuri per nivel
+  const perLevel: Record<string, number> = {};
+  for (const m of matchesInPeriod) {
+    const k = `Nivel ${m.level}`;
+    perLevel[k] = (perLevel[k] ?? 0) + 1;
+  }
+
+  // unique useri care au jucat in perioada (numai REAL)
+  const activePlayers = await prisma.matchPlayer.findMany({
+    where: { createdAt: { gte: since }, user: { userType: 'REAL' } },
+    select: { userId: true },
+    distinct: ['userId'],
+  });
+  const activePlayersCount = activePlayers.length;
+
+  // useri care au jucat solo vs grup (unici, REAL)
+  const soloMatchIds = matchesInPeriod.filter(m => m.isAI).map((_: unknown) => '');
+  const soloMatchIdsReal = await prisma.match.findMany({
+    where: { createdAt: { gte: since }, status: 'finished', isAI: true },
+    select: { id: true },
+  });
+  const groupMatchIdsReal = await prisma.match.findMany({
+    where: { createdAt: { gte: since }, status: 'finished', isAI: false },
+    select: { id: true },
+  });
+
+  const [soloUniquePlayers, groupUniquePlayers] = await Promise.all([
+    prisma.matchPlayer.findMany({
+      where: { matchId: { in: soloMatchIdsReal.map(m => m.id) }, user: { userType: 'REAL' } },
+      select: { userId: true }, distinct: ['userId'],
+    }),
+    prisma.matchPlayer.findMany({
+      where: { matchId: { in: groupMatchIdsReal.map(m => m.id) }, user: { userType: 'REAL' } },
+      select: { userId: true }, distinct: ['userId'],
+    }),
+  ]);
+
+  // distribuție useri per ligă
+  const leagueRaw = await prisma.user.groupBy({
+    by: ['league'],
+    where: { userType: 'REAL' },
+    _count: { id: true },
+  });
+  const perLeague = Object.fromEntries(leagueRaw.map(r => [r.league, r._count.id]));
+
+  // top 5 useri după rating (reali)
+  const topUsers = await prisma.user.findMany({
+    where: { userType: 'REAL' },
+    orderBy: { rating: 'desc' },
+    take: 5,
+    select: { username: true, rating: true, league: true, xp: true },
+  });
+
+  // serii temporale: useri noi per zi (ultimele 30 zile fix)
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const recentRegistrations = await prisma.user.findMany({
+    where: { createdAt: { gte: thirtyDaysAgo }, userType: 'REAL' },
+    select: { createdAt: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  const registrationsByDay: Record<string, number> = {};
+  for (const u of recentRegistrations) {
+    const d = u.createdAt.toISOString().split('T')[0];
+    registrationsByDay[d] = (registrationsByDay[d] ?? 0) + 1;
+  }
+  const registrationTimeline = Object.entries(registrationsByDay)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, count]) => ({ date, count }));
+
+  // serii temporale: meciuri per zi (ultimele 30 zile fix)
+  const recentMatches = await prisma.match.findMany({
+    where: { createdAt: { gte: thirtyDaysAgo }, status: 'finished' },
+    select: { createdAt: true, gameType: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  const matchesByDay: Record<string, number> = {};
+  for (const m of recentMatches) {
+    const d = m.createdAt.toISOString().split('T')[0];
+    matchesByDay[d] = (matchesByDay[d] ?? 0) + 1;
+  }
+  const matchTimeline = Object.entries(matchesByDay)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, count]) => ({ date, count }));
+
+  res.json({
+    period,
+    users: { total: totalUsers, real: totalRealUsers, bots: totalBots, ghosts: totalGhosts, newInPeriod: newUsers, activePlayers: activePlayersCount },
+    matches: { total: matchesTotal, solo: matchesSolo, group: matchesGroup, perGame, perLevel },
+    players: { soloUnique: soloUniquePlayers.length, groupUnique: groupUniquePlayers.length },
+    perLeague,
+    topUsers,
+    registrationTimeline,
+    matchTimeline,
+  });
+}));
+
+// ─── GET /api/admin/stats/games-per-day ──────────────────────────────────────
+router.get('/stats/games-per-day', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const days = Math.min(90, Math.max(1, parseInt((req.query as { days?: string }).days ?? '30', 10) || 30));
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const matches = await prisma.match.findMany({
+    where: { createdAt: { gte: since }, status: 'finished' },
+    select: { gameType: true, createdAt: true },
+  });
+
+  const gameTypesSet = new Set<string>();
+  const grouped: Record<string, Record<string, number>> = {};
+
+  for (const match of matches) {
+    const date = match.createdAt.toISOString().split('T')[0];
+    gameTypesSet.add(match.gameType);
+    if (!grouped[date]) grouped[date] = {};
+    grouped[date][match.gameType] = (grouped[date][match.gameType] ?? 0) + 1;
+  }
+
+  const gameTypes = [...gameTypesSet].sort();
+  const data = Object.entries(grouped)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, counts]) => ({ date, ...counts }));
+
+  res.json({ data, gameTypes, days });
 }));
 
 // ─── GET /api/admin/simulated-players/health ─────────────────────────────────
@@ -402,6 +567,7 @@ router.get('/simulated-players/profiles', adminAuth, asyncHandler(async (req: Ad
             rating: true,
             xp: true,
             league: true,
+            _count: { select: { matchPlayers: true } },
           },
         },
       },
@@ -930,11 +1096,13 @@ router.get('/users', adminAuth, asyncHandler(async (req: AdminRequest, res: Resp
   const page = parseInt((req.query.page as string) || '1');
   const limit = parseInt((req.query.limit as string) || '20');
   const search = (req.query.search as string) || '';
+  const userType = (req.query.userType as string) || '';
   const skip = (page - 1) * limit;
 
-  const where = search
+  const baseWhere = search
     ? { OR: [{ email: { contains: search } }, { username: { contains: search } }] }
     : {};
+  const where = userType ? { ...baseWhere, userType } : baseWhere;
 
   const [users, total] = await Promise.all([
     prisma.user.findMany({
@@ -945,6 +1113,7 @@ router.get('/users', adminAuth, asyncHandler(async (req: AdminRequest, res: Resp
       select: {
         id: true, email: true, username: true, avatarUrl: true,
         rating: true, xp: true, league: true, referralCode: true, createdAt: true,
+        userType: true, isBanned: true, lastIp: true,
         _count: { select: { matchPlayers: true } },
       },
     }),
@@ -985,6 +1154,34 @@ router.patch('/users/:id/set-rating', adminAuth, asyncHandler(async (req: AdminR
   });
   logger.info(`[ADMIN] Rating setat la ${rating} pentru ${user.username}`);
   res.json({ message: `Rating setat la ${rating}`, user });
+}));
+
+// ─── PATCH /api/admin/users/:id/toggle-ban ────────────────────────────────────
+router.patch('/users/:id/toggle-ban', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { id } = req.params;
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) { res.status(404).json({ error: 'User inexistent' }); return; }
+  const newBanned = !user.isBanned;
+  const updated = await prisma.user.update({
+    where: { id },
+    data: { isBanned: newBanned },
+  });
+
+  // Auto-ban/unban IP if we have it
+  if (user.lastIp && user.lastIp !== 'unknown') {
+    if (newBanned) {
+      await prisma.bannedIP.upsert({
+        where: { ip: user.lastIp },
+        update: { bannedUserId: id, reason: 'ban_user' },
+        create: { ip: user.lastIp, bannedUserId: id, reason: 'ban_user' },
+      });
+    } else {
+      await prisma.bannedIP.deleteMany({ where: { bannedUserId: id } });
+    }
+  }
+
+  logger.warn(`[ADMIN] User ${newBanned ? 'banat' : 'debanat'}: ${updated.username} (IP: ${user.lastIp || 'necunoscut'}) de catre ${req.adminUsername}`);
+  res.json({ message: newBanned ? 'User banat + IP blocat' : 'User debanat + IP deblocat', isBanned: newBanned, ip: user.lastIp });
 }));
 
 // ─── GET /api/admin/invites ───────────────────────────────────────────────────
@@ -1102,6 +1299,346 @@ router.post('/create', asyncHandler(async (req: Request, res: Response) => {
   const admin = await prisma.admin.create({ data: { username, passwordHash } });
   logger.info(`[ADMIN] Cont admin creat: ${admin.username}`);
   res.status(201).json({ id: admin.id, username: admin.username });
+}));
+
+// ─── GET /api/admin/scoring-configs ──────────────────────────────────────────
+// Returnează toate jocurile cu regulile lor default (din cod) + override-urile din DB.
+router.get('/scoring-configs', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const [dbConfigs, matchLevels] = await Promise.all([
+    prisma.gameScoringConfig.findMany({
+      orderBy: [{ gameType: 'asc' }, { level: 'asc' }],
+    }),
+    prisma.match.findMany({
+      distinct: ['gameType', 'level'],
+      select: { gameType: true, level: true },
+    }),
+  ]);
+
+  // Build map: gameType → sorted unique levels that have been played
+  const levelsByGame = new Map<string, number[]>();
+  for (const m of matchLevels) {
+    const existing = levelsByGame.get(m.gameType) ?? [];
+    existing.push(m.level);
+    levelsByGame.set(m.gameType, existing);
+  }
+
+  const seen = new Set<string>();
+  const result = gameRegistry.listAll()
+    .filter((game) => {
+      const canonical = toCanonicalGameType(game.meta.id);
+      if (seen.has(canonical)) return false;
+      seen.add(canonical);
+      return true;
+    })
+    .map((game) => {
+      const canonical = toCanonicalGameType(game.meta.id);
+      const gameConfigs = dbConfigs.filter((c) => c.gameType === canonical);
+      const rawLevels = levelsByGame.get(canonical) ?? [];
+      const availableLevels = [...new Set(rawLevels)].sort((a, b) => a - b);
+      return {
+        gameType: canonical,
+        name: game.meta.name,
+        icon: game.meta.icon,
+        primaryColor: game.meta.primaryColor,
+        defaultRules: game.rules,
+        availableLevels,
+        overrides: gameConfigs.map((c) => ({
+          id: c.id,
+          level: c.level,
+          pointsPerCorrect:   c.pointsPerCorrect,
+          pointsPerMistake:   c.pointsPerMistake,
+          bonusFirstFinisher: c.bonusFirstFinisher,
+          bonusCompletion:    c.bonusCompletion,
+          timeLimitSeconds:   c.timeLimitSeconds,
+          forfeitBonus:       c.forfeitBonus,
+          updatedBy:          c.updatedBy,
+          updatedAt:          c.updatedAt,
+        })),
+      };
+    });
+
+  res.json({ configs: result });
+}));
+
+// ─── PATCH /api/admin/scoring-configs/:gameType ───────────────────────────────
+// Salvează (sau actualizează) un override pentru un joc + nivel opțional.
+// Body: { level?: number | null, pointsPerCorrect?: number, ... }
+router.patch('/scoring-configs/:gameType', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const gameType = toCanonicalGameType(req.params.gameType);
+
+  if (!gameRegistry.isRegistered(gameType)) {
+    res.status(404).json({ error: 'Joc necunoscut' });
+    return;
+  }
+
+  const {
+    level,
+    pointsPerCorrect,
+    pointsPerMistake,
+    bonusFirstFinisher,
+    bonusCompletion,
+    timeLimitSeconds,
+    forfeitBonus,
+  } = req.body as {
+    level?: number | null;
+    pointsPerCorrect?: number;
+    pointsPerMistake?: number;
+    bonusFirstFinisher?: number;
+    bonusCompletion?: number;
+    timeLimitSeconds?: number;
+    forfeitBonus?: number;
+  };
+
+  const normalizedLevel = (level !== undefined && level !== null) ? Math.max(1, Math.floor(Number(level))) : null;
+
+  // Validare câmpuri numerice
+  const numFields: Array<[string, number | undefined]> = [
+    ['pointsPerCorrect', pointsPerCorrect],
+    ['pointsPerMistake', pointsPerMistake],
+    ['bonusFirstFinisher', bonusFirstFinisher],
+    ['bonusCompletion', bonusCompletion],
+    ['timeLimitSeconds', timeLimitSeconds],
+    ['forfeitBonus', forfeitBonus],
+  ];
+  for (const [name, val] of numFields) {
+    if (val !== undefined && (!Number.isFinite(val) || !Number.isInteger(val))) {
+      res.status(400).json({ error: `${name} trebuie să fie număr întreg` });
+      return;
+    }
+  }
+  if (timeLimitSeconds !== undefined && timeLimitSeconds < 10) {
+    res.status(400).json({ error: 'timeLimitSeconds minim 10 secunde' });
+    return;
+  }
+
+  const data = {
+    gameType,
+    level: normalizedLevel,
+    ...(pointsPerCorrect   !== undefined ? { pointsPerCorrect }   : {}),
+    ...(pointsPerMistake   !== undefined ? { pointsPerMistake }   : {}),
+    ...(bonusFirstFinisher !== undefined ? { bonusFirstFinisher } : {}),
+    ...(bonusCompletion    !== undefined ? { bonusCompletion }    : {}),
+    ...(timeLimitSeconds   !== undefined ? { timeLimitSeconds }   : {}),
+    ...(forfeitBonus       !== undefined ? { forfeitBonus }       : {}),
+    updatedBy: req.adminUsername,
+  };
+
+  // Folosim findFirst + create/update în loc de upsert, deoarece SQLite tratează
+  // valorile NULL ca distincte în unique indexes, deci upsert cu level=null nu funcționează.
+  const existing = await prisma.gameScoringConfig.findFirst({
+    where: { gameType, level: normalizedLevel },
+  });
+
+  let saved;
+  if (existing) {
+    saved = await prisma.gameScoringConfig.update({ where: { id: existing.id }, data });
+  } else {
+    saved = await prisma.gameScoringConfig.create({ data });
+  }
+
+  // Reîncarcă override-urile în memorie
+  await gameRegistry.loadScoringOverrides(prisma);
+
+  logger.info('[ADMIN] Scoring config updated', {
+    admin: req.adminUsername,
+    gameType,
+    level: normalizedLevel,
+  });
+
+  res.json({ config: saved });
+}));
+
+// ─── DELETE /api/admin/scoring-configs/:gameType ─────────────────────────────
+// Șterge override-ul pentru un joc + nivel (revert la default-urile din cod).
+// Query param: ?level=N (sau fără, pentru override-ul de bază nivel=null)
+router.delete('/scoring-configs/:gameType', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const gameType = toCanonicalGameType(req.params.gameType);
+  const levelParam = req.query.level as string | undefined;
+  const level = levelParam !== undefined ? parseInt(levelParam, 10) : null;
+
+  const existing = await prisma.gameScoringConfig.findFirst({
+    where: { gameType, level },
+  });
+
+  if (!existing) {
+    res.status(404).json({ error: 'Override inexistent' });
+    return;
+  }
+
+  await prisma.gameScoringConfig.delete({ where: { id: existing.id } });
+
+  // Reîncarcă override-urile în memorie
+  await gameRegistry.loadScoringOverrides(prisma);
+
+  logger.info('[ADMIN] Scoring config deleted', {
+    admin: req.adminUsername,
+    gameType,
+    level,
+  });
+
+  res.json({ ok: true });
+}));
+
+// ─── GET /api/admin/system-config ────────────────────────────────────────────
+router.get('/system-config', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  res.json(systemConfigService.getSnapshot());
+}));
+
+// ─── PATCH /api/admin/system-config/elo ──────────────────────────────────────
+router.patch('/system-config/elo', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { kFactorLow, kFactorMid, kFactorHigh, thresholdMid, thresholdHigh } = req.body as {
+    kFactorLow?: number; kFactorMid?: number; kFactorHigh?: number;
+    thresholdMid?: number; thresholdHigh?: number;
+  };
+
+  const kFields: Array<[string, number | undefined]> = [
+    ['kFactorLow', kFactorLow], ['kFactorMid', kFactorMid], ['kFactorHigh', kFactorHigh],
+  ];
+  for (const [name, val] of kFields) {
+    if (val !== undefined) {
+      if (!Number.isFinite(val) || !Number.isInteger(val) ||
+          val < ELO_LIMITS.kFactor.min || val > ELO_LIMITS.kFactor.max) {
+        res.status(400).json({ error: `${name} trebuie să fie integer între ${ELO_LIMITS.kFactor.min} și ${ELO_LIMITS.kFactor.max}` });
+        return;
+      }
+    }
+  }
+  const tFields: Array<[string, number | undefined]> = [
+    ['thresholdMid', thresholdMid], ['thresholdHigh', thresholdHigh],
+  ];
+  for (const [name, val] of tFields) {
+    if (val !== undefined) {
+      if (!Number.isFinite(val) || !Number.isInteger(val) ||
+          val < ELO_LIMITS.threshold.min || val > ELO_LIMITS.threshold.max) {
+        res.status(400).json({ error: `${name} trebuie să fie integer între ${ELO_LIMITS.threshold.min} și ${ELO_LIMITS.threshold.max}` });
+        return;
+      }
+    }
+  }
+
+  const current = systemConfigService.getElo();
+  const merged = {
+    ...current,
+    ...(kFactorLow    !== undefined ? { kFactorLow }    : {}),
+    ...(kFactorMid    !== undefined ? { kFactorMid }    : {}),
+    ...(kFactorHigh   !== undefined ? { kFactorHigh }   : {}),
+    ...(thresholdMid  !== undefined ? { thresholdMid }  : {}),
+    ...(thresholdHigh !== undefined ? { thresholdHigh } : {}),
+  };
+
+  if (merged.thresholdMid >= merged.thresholdHigh) {
+    res.status(400).json({ error: 'thresholdMid trebuie să fie mai mic decât thresholdHigh' });
+    return;
+  }
+
+  await prisma.systemConfig.upsert({
+    where: { key: 'elo' },
+    create: { key: 'elo', value: JSON.stringify(merged), updatedBy: req.adminUsername },
+    update: { value: JSON.stringify(merged), updatedBy: req.adminUsername },
+  });
+  systemConfigService.setElo(merged);
+
+  logger.info('[ADMIN] SystemConfig ELO updated', { admin: req.adminUsername, merged });
+  res.json({ elo: systemConfigService.getElo(), defaults: DEFAULT_ELO });
+}));
+
+// ─── PATCH /api/admin/system-config/xp ───────────────────────────────────────
+router.patch('/system-config/xp', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { perWin, perLoss, perDraw, bonusTop3 } = req.body as {
+    perWin?: number; perLoss?: number; perDraw?: number; bonusTop3?: number;
+  };
+
+  const fields: Array<[string, number | undefined, { min: number; max: number }]> = [
+    ['perWin',    perWin,    XP_LIMITS.perWin],
+    ['perLoss',   perLoss,   XP_LIMITS.perLoss],
+    ['perDraw',   perDraw,   XP_LIMITS.perDraw],
+    ['bonusTop3', bonusTop3, XP_LIMITS.bonusTop3],
+  ];
+  for (const [name, val, limits] of fields) {
+    if (val !== undefined && (!Number.isFinite(val) || !Number.isInteger(val) || val < limits.min || val > limits.max)) {
+      res.status(400).json({ error: `${name} trebuie să fie integer între ${limits.min} și ${limits.max}` });
+      return;
+    }
+  }
+
+  const current = systemConfigService.getXp();
+  const merged = {
+    ...current,
+    ...(perWin    !== undefined ? { perWin }    : {}),
+    ...(perLoss   !== undefined ? { perLoss }   : {}),
+    ...(perDraw   !== undefined ? { perDraw }   : {}),
+    ...(bonusTop3 !== undefined ? { bonusTop3 } : {}),
+  };
+
+  await prisma.systemConfig.upsert({
+    where: { key: 'xp' },
+    create: { key: 'xp', value: JSON.stringify(merged), updatedBy: req.adminUsername },
+    update: { value: JSON.stringify(merged), updatedBy: req.adminUsername },
+  });
+  systemConfigService.setXp(merged);
+
+  logger.info('[ADMIN] SystemConfig XP updated', { admin: req.adminUsername, merged });
+  res.json({ xp: systemConfigService.getXp(), defaults: DEFAULT_XP });
+}));
+
+// ─── PATCH /api/admin/system-config/league ────────────────────────────────────
+router.patch('/system-config/league', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { silver, gold, platinum, diamond } = req.body as {
+    silver?: number; gold?: number; platinum?: number; diamond?: number;
+  };
+
+  const fields: Array<[string, number | undefined]> = [
+    ['silver', silver], ['gold', gold], ['platinum', platinum], ['diamond', diamond],
+  ];
+  for (const [name, val] of fields) {
+    if (val !== undefined && (!Number.isFinite(val) || !Number.isInteger(val) ||
+        val < LEAGUE_LIMITS.rating.min || val > LEAGUE_LIMITS.rating.max)) {
+      res.status(400).json({ error: `${name} trebuie să fie integer între ${LEAGUE_LIMITS.rating.min} și ${LEAGUE_LIMITS.rating.max}` });
+      return;
+    }
+  }
+
+  const current = systemConfigService.getLeague();
+  const merged = {
+    ...current,
+    ...(silver   !== undefined ? { silver }   : {}),
+    ...(gold     !== undefined ? { gold }     : {}),
+    ...(platinum !== undefined ? { platinum } : {}),
+    ...(diamond  !== undefined ? { diamond }  : {}),
+  };
+
+  if (merged.silver >= merged.gold || merged.gold >= merged.platinum || merged.platinum >= merged.diamond) {
+    res.status(400).json({ error: 'Pragurile ligilor trebuie să fie în ordine crescătoare: silver < gold < platinum < diamond' });
+    return;
+  }
+
+  await prisma.systemConfig.upsert({
+    where: { key: 'league' },
+    create: { key: 'league', value: JSON.stringify(merged), updatedBy: req.adminUsername },
+    update: { value: JSON.stringify(merged), updatedBy: req.adminUsername },
+  });
+  systemConfigService.setLeague(merged);
+
+  logger.info('[ADMIN] SystemConfig League updated', { admin: req.adminUsername, merged });
+  res.json({ league: systemConfigService.getLeague(), defaults: DEFAULT_LEAGUE });
+}));
+
+// ─── DELETE /api/admin/system-config/:key — reset la default ─────────────────
+router.delete('/system-config/:key', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const key = req.params.key;
+  if (!['elo', 'xp', 'league'].includes(key)) {
+    res.status(400).json({ error: 'Key invalid. Valori acceptate: elo, xp, league' });
+    return;
+  }
+
+  await prisma.systemConfig.deleteMany({ where: { key } });
+
+  if (key === 'elo')    systemConfigService.setElo({ ...DEFAULT_ELO });
+  if (key === 'xp')     systemConfigService.setXp({ ...DEFAULT_XP });
+  if (key === 'league') systemConfigService.setLeague({ ...DEFAULT_LEAGUE });
+
+  logger.info(`[ADMIN] SystemConfig ${key} reset la default`, { admin: req.adminUsername });
+  res.json({ ok: true, reset: key });
 }));
 
 export default router;

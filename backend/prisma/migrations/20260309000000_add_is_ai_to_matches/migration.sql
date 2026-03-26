@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "matches" ADD COLUMN "isAI" BOOLEAN NOT NULL DEFAULT false;

@@ -3,12 +3,11 @@ import prisma from '../prisma';
 import logger from '../logger';
 import {
   SOCKET_EVENTS,
-  calculateXPGained,
-  calculateELO,
-  ratingToLeague,
 } from '@integrame/shared';
 import { gameRegistry } from '../games/GameRegistry';
+import { systemConfigService } from '../services/SystemConfigService';
 import { config } from '../config';
+import { startBotGameplaySimulation } from '../services/simulatedPlayers/BotGameplaySimulator';
 
 const countdownTimers: Record<string, ReturnType<typeof setInterval>> = {};
 const matchTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -17,7 +16,7 @@ const countdownStarted: Set<string> = new Set();
 // Tracker socket.id → matchId (pentru detectare disconnect)
 const socketMatchMap: Map<string, string> = new Map();
 const progressRateState: Map<string, { windowStart: number; count: number }> = new Map();
-const ghostEventBuffers: Map<string, Array<{ action: string; time: number; score?: number; correctAnswers?: number; mistakes?: number }>> = new Map();
+const ghostEventBuffers: Map<string, Array<{ action: string; time: number; score?: number; correctAnswers?: number; mistakes?: number; wallHits?: number }>> = new Map();
 
 const PROGRESS_RATE_WINDOW_MS = 1000;
 const PROGRESS_RATE_MAX_PER_WINDOW = 10;
@@ -185,7 +184,7 @@ function pushGhostEvent(
   userId: string,
   action: string,
   startedAt: Date | null,
-  payload?: { score?: number; correctAnswers?: number; mistakes?: number },
+  payload?: { score?: number; correctAnswers?: number; mistakes?: number; wallHits?: number },
 ) {
   if (!config.features.ghostPlayersEnabled) return;
 
@@ -202,6 +201,7 @@ function pushGhostEvent(
     score: payload?.score,
     correctAnswers: payload?.correctAnswers,
     mistakes: payload?.mistakes,
+    wallHits: payload?.wallHits,
   });
 
   if (current.length > MAX_GHOST_EVENTS_PER_PLAYER) {
@@ -231,26 +231,32 @@ async function captureGhostRuns(match: any): Promise<void> {
 
     const events = buffered.length > 0
       ? buffered
-      : [{ action: 'finish', time: 0, score: player.score, correctAnswers: player.correctAnswers, mistakes: player.mistakes }];
+      : [{ action: 'finish', time: 0, score: player.score, correctAnswers: player.correctAnswers, mistakes: player.mistakes, wallHits: undefined as number | undefined }];
 
     const completionTimeSec = player.finishedAt
       ? Math.max(0, Number(((new Date(player.finishedAt).getTime() - startedMs) / 1000).toFixed(2)))
       : 0;
+
+    // Prefer actual wallHits from the finish event (recorded regardless of penalty level)
+    const finishEvent = events.slice().reverse().find((e: any) => e.action === 'finish');
+    const actualWallHits = typeof finishEvent?.wallHits === 'number'
+      ? finishEvent.wallHits
+      : player.mistakes ?? 0;
 
     await prisma.ghostRun.create({
       data: {
         playerId: player.userId,
         gameType: match.gameType,
         difficulty: match.level,
-        moves: JSON.stringify(events.map((event) => ({
+        moves: JSON.stringify(events.map((event: any) => ({
           action: event.action,
           time: event.time,
           score: event.score,
           correctAnswers: event.correctAnswers,
           mistakes: event.mistakes,
         }))),
-        timestamps: JSON.stringify(events.map((event) => event.time)),
-        mistakes: player.mistakes ?? 0,
+        timestamps: JSON.stringify(events.map((event: any) => event.time)),
+        mistakes: actualWallHits,
         corrections: 0,
         completionTime: completionTimeSec,
         finalScore: player.score ?? 0,
@@ -330,13 +336,22 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           await prisma.match.update({ where: { id: matchId }, data: { status: 'active', startedAt: new Date() } });
           io.to(room).emit(SOCKET_EVENTS.MATCH_START, { startedAt: new Date() });
           logger.info(`[COUNTDOWN] MATCH_START emis room=${room}`);
-          const rules = gameRegistry.getRules(match.gameType);
+          const rules = gameRegistry.getEffectiveRules(match.gameType, match.level);
           if (!rules) {
             logger.error('[COUNTDOWN] game rules missing for match', { matchId, gameType: match.gameType });
             io.to(room).emit(SOCKET_EVENTS.ERROR, { message: 'Game rules not found' });
             return;
           }
           matchTimers[matchId] = setTimeout(() => autoFinishMatch(io, matchId, room), rules.timeLimit * 1000);
+          // Pornește simularea gameplay pentru boti (SIMULATED/GHOST)
+          startBotGameplaySimulation({
+            io,
+            matchId,
+            room,
+            gameType: match.gameType,
+            level: match.level,
+            timeLimit: rules.timeLimit,
+          }).catch((err) => logger.error('[BOT_SIM] failed to start', { matchId, err }));
         }
       }, 1000);
 
@@ -378,7 +393,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           });
         }
 
-        const liveScore = gameRegistry.calculateLiveScore(match.gameType, correctAnswers, mistakes);
+        const liveScore = gameRegistry.calculateLiveScoreForLevel(match.gameType, match.level, correctAnswers, mistakes);
 
         pushGhostEvent(matchId, userId, 'progress', match.startedAt, {
           score: liveScore,
@@ -437,15 +452,20 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           });
         }
 
-        const finishedPlayers = match.players.filter((p: any) => p.finishedAt);
-        const isFirst = finishedPlayers.length === 0;
+        // isFirst = true doar dacă niciun alt jucător REAL nu a terminat deja
+        // (botii pot avea finishedAt setat de simulator, nu contează pentru bonus)
+        const finishedRealPlayers = match.players.filter(
+          (p: any) => p.finishedAt && p.user?.userType === 'REAL' && p.userId !== userId,
+        );
+        const isFirst = finishedRealPlayers.length === 0;
 
-        const finalScore = gameRegistry.calculateFinalScore(match.gameType, correctAnswers, mistakes, isFirst);
+        const finalScore = gameRegistry.calculateFinalScoreForLevel(match.gameType, match.level, correctAnswers, mistakes, isFirst);
 
         pushGhostEvent(matchId, userId, 'finish', match.startedAt, {
           score: finalScore,
           correctAnswers,
           mistakes,
+          wallHits: typeof metrics.wallHits === 'number' ? metrics.wallHits : undefined,
         });
 
         await prisma.matchPlayer.updateMany({
@@ -474,9 +494,13 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           players: updated?.players,
         });
 
-        // All finished?
+        // All finished? — dacă toți jucătorii reali au terminat, încheiem meciul
+        // imediat fără să așteptăm botii (SIMULATED/GHOST) care nu trimit PLAYER_FINISH
         const allFinished = updated?.players.every((p: any) => p.finishedAt);
-        if (allFinished) {
+        const allRealFinished = updated?.players
+          .filter((p: any) => p.user?.userType === 'REAL')
+          .every((p: any) => p.finishedAt);
+        if (allFinished || allRealFinished) {
           clearTimeout(matchTimers[matchId]);
           await finalizeMatch(io, matchId, `match:${matchId}`);
         }
@@ -548,7 +572,7 @@ async function handlePlayerLeft(io: SocketServer, userId: string, matchId: strin
   });
 
   // Marcheaza ceilalti jucatori ca terminati + bonus forfeit (per joc)
-  const FORFEIT_BONUS = gameRegistry.getForfeitBonus(match.gameType);
+  const FORFEIT_BONUS = gameRegistry.getEffectiveRules(match.gameType, match.level)?.forfeitBonus ?? gameRegistry.getForfeitBonus(match.gameType);
   for (const p of match.players) {
     if (p.userId !== userId && !p.finishedAt) {
       await prisma.matchPlayer.updateMany({
@@ -722,6 +746,18 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string, fo
     });
     if (!match) return;
 
+    // Marchează botii (SIMULATED/GHOST) care nu au terminat — se întâmplă când
+    // meciul e finalizat devreme de un jucător real ce-a ajuns la finish
+    const now = new Date();
+    for (const p of match.players) {
+      if (!p.finishedAt && p.user?.userType !== 'REAL') {
+        await prisma.matchPlayer.updateMany({
+          where: { matchId, userId: p.userId },
+          data: { finishedAt: now },
+        });
+      }
+    }
+
     // Sort by score descending; forfeit player always last
     const sorted = [...match.players].sort((a, b) => {
       if (forfeitUserId) {
@@ -739,10 +775,10 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string, fo
       const position = i + 1;
       const opponentRatings = (allRatings as number[]).filter((_: number, idx: number) => match.players[idx].userId !== mp.userId);
       const newElo = opponentRatings.length > 0
-        ? calculateELO(mp.user.rating, opponentRatings, position, totalPlayers)
+        ? systemConfigService.calculateELO(mp.user.rating, opponentRatings, position, totalPlayers)
         : mp.user.rating;
       const eloChange = newElo - mp.user.rating;
-      const xpGained = calculateXPGained(position, totalPlayers);
+      const xpGained = systemConfigService.calculateXPGained(position, totalPlayers);
 
       await prisma.matchPlayer.updateMany({
         where: { matchId, userId: mp.userId },
@@ -754,18 +790,20 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string, fo
         data: {
           rating: newElo,
           xp: { increment: xpGained },
-          league: ratingToLeague(newElo),
+          league: systemConfigService.ratingToLeague(newElo),
         },
       });
 
       // Upsert UserGameStats
+      // Normalizăm gameType: 'maze' și 'labirinturi' sunt același joc, stocăm ca 'labirinturi'
+      const statsGameType = match.gameType === 'maze' ? 'labirinturi' : match.gameType;
       const isWin = position === 1;
       const isLoss = position === totalPlayers;
       await prisma.userGameStats.upsert({
-        where: { userId_gameType_level: { userId: mp.userId, gameType: match.gameType, level: match.level } },
+        where: { userId_gameType_level: { userId: mp.userId, gameType: statsGameType, level: match.level } },
         create: {
           userId: mp.userId,
-          gameType: match.gameType,
+          gameType: statsGameType,
           level: match.level,
           totalMatches: 1,
           wins: isWin ? 1 : 0,
@@ -785,7 +823,7 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string, fo
           draws: !isWin && !isLoss ? { increment: 1 } : undefined,
           totalScore: { increment: mp.score },
           bestScore: mp.score > (await prisma.userGameStats.findUnique({
-            where: { userId_gameType_level: { userId: mp.userId, gameType: match.gameType, level: match.level } },
+            where: { userId_gameType_level: { userId: mp.userId, gameType: statsGameType, level: match.level } },
           }).then((s: { bestScore: number } | null) => s?.bestScore ?? 0)) ? mp.score : undefined,
         },
       });

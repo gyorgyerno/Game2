@@ -1,13 +1,24 @@
 'use client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Trophy, LogOut, Home } from 'lucide-react';
+import { Trophy, LogOut, Home, UserPlus } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
+import { useEffect, useState } from 'react';
+import { friendsApi } from '@/lib/api';
 
 export default function Navbar() {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const leagueLabel = user?.league ? user.league.charAt(0).toUpperCase() + user.league.slice(1) : '';
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    const fetch = () => friendsApi.requests().then(r => setPendingCount(r.data.length)).catch(() => {});
+    fetch();
+    const interval = setInterval(fetch, 30000); // polling la 30s
+    return () => clearInterval(interval);
+  }, [user]);
 
   function handleLogout() {
     logout();
@@ -27,6 +38,14 @@ export default function Navbar() {
           <div className="flex items-center gap-2">
             <Link href="/dashboard" className="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-violet-100 transition-colors hover:bg-white/20"><Home size={14} /></Link>
             <Link href="/games/integrame/leaderboard" className="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-violet-100 transition-colors hover:bg-white/20"><Trophy size={14} /></Link>
+            <Link href="/profile#prieteni" className="relative inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-violet-100 transition-colors hover:bg-white/20">
+              <UserPlus size={14} />
+              {pendingCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
+                  {pendingCount}
+                </span>
+              )}
+            </Link>
             {user && (
               <div className="flex items-center gap-2 ml-2">
                 <img

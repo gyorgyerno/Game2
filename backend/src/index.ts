@@ -25,6 +25,8 @@ import prisma from './prisma';
 import { activityFeedGenerator } from './services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from './services/simulatedPlayers/BotChatGenerator';
 import { runtimeMetricsMonitor } from './services/simulatedPlayers/RuntimeMetricsMonitor';
+import { gameRegistry } from './games/GameRegistry';
+import { systemConfigService } from './services/SystemConfigService';
 
 const app = express();
 const server = http.createServer(app);
@@ -39,7 +41,7 @@ app.use(requestLogger);   // ← HTTP request/response logging
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 200,
+    max: 600,
     standardHeaders: true,
     legacyHeaders: false,
     skip: (req) => req.path === '/api/admin/simulated-players/health',
@@ -111,6 +113,22 @@ server.listen(config.port, async () => {
   activityFeedGenerator.start();
   botChatGenerator.start();
   runtimeMetricsMonitor.start();
+
+  // Încarcă override-urile de scoring din DB
+  try {
+    await gameRegistry.loadScoringOverrides(prisma);
+    logger.info('✅ Scoring overrides încărcate din DB');
+  } catch (err) {
+    logger.error('❌ Scoring overrides load eșuat', { err });
+  }
+
+  // Încarcă configurația sistem (ELO / XP / Ligi) din DB
+  try {
+    await systemConfigService.load(prisma);
+    logger.info('✅ System config (ELO/XP/Ligi) încărcat din DB');
+  } catch (err) {
+    logger.error('❌ System config load eșuat', { err });
+  }
 });
 
 export default app;
