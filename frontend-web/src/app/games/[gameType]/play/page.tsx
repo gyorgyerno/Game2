@@ -9,6 +9,7 @@ import AIChatWidget from '@/components/game/AIChatWidget';
 import GameNavbar from '@/components/game/GameNavbar';
 import GameTimer from '@/components/game/GameTimer';
 import EmojiReactions from '@/components/game/EmojiReactions';
+import GameLobbyPanel from '@/components/game/GameLobbyPanel';
 import { useAuthStore } from '@/store/auth';
 import { matchesApi, aiApi } from '@/lib/api';
 import { getSocket, SOCKET_EVENTS } from '@/lib/socket';
@@ -16,7 +17,7 @@ import { GAME_RULES, Match, MatchPlayer, MAX_PLAYERS_PER_LEVEL, GameLevel } from
 import { SAMPLE_INTEGRAMA } from '@/lib/puzzles';
 import type { CrosswordPuzzle } from '@/components/game/CrosswordGrid';
 import clsx from 'clsx';
-import { isLabyrinthGameType, toCanonicalGameType } from '@/games/registry';
+import { isLabyrinthGameType, toCanonicalGameType, getGameByType } from '@/games/registry';
 
 interface PageProps {
   params: { gameType: string };
@@ -27,22 +28,8 @@ function GamePlayPageInner({ params }: PageProps) {
   const canonicalGameType = toCanonicalGameType(gameType);
   const isLabyrinth = isLabyrinthGameType(gameType);
   const accent = isLabyrinth
-    ? {
-      bgSoft: 'bg-emerald-100',
-      borderSoft: 'border-emerald-300',
-      textStrong: 'text-emerald-700',
-      textDim: 'text-emerald-600',
-      countdownMain: 'text-emerald-600',
-      countdownWarn: 'text-orange-500',
-    }
-    : {
-      bgSoft: 'bg-violet-100',
-      borderSoft: 'border-violet-300',
-      textStrong: 'text-violet-700',
-      textDim: 'text-violet-500',
-      countdownMain: 'text-violet-600',
-      countdownWarn: 'text-red-500',
-    };
+    ? { countdownMain: 'text-emerald-600', countdownWarn: 'text-orange-500' }
+    : { countdownMain: 'text-violet-600',  countdownWarn: 'text-red-500' };
   const router = useRouter();
   const searchParams = useSearchParams();
   const matchId = searchParams.get('matchId') || '';
@@ -67,6 +54,7 @@ function GamePlayPageInner({ params }: PageProps) {
   const [aiLoading, setAiLoading] = useState(false);
   const [lastReaction, setLastReaction] = useState<{ userId: string; emoji: string; fromMe: boolean } | null>(null);
   const [latestMetrics, setLatestMetrics] = useState<Record<string, unknown> | undefined>(undefined);
+  const [mazeSeed, setMazeSeed] = useState<number | undefined>(undefined);
 
   const puzzle: CrosswordPuzzle = aiPuzzle || SAMPLE_INTEGRAMA;
   const rules = GAME_RULES[canonicalGameType] || GAME_RULES['integrame'];
@@ -132,7 +120,11 @@ function GamePlayPageInner({ params }: PageProps) {
       }
     });
     socket.on(SOCKET_EVENTS.MATCH_COUNTDOWN, ({ countdown: c }: { countdown: number }) => setCountdown(c));
-    socket.on(SOCKET_EVENTS.MATCH_START, () => { setCountdown(null); setStarted(true); });
+    socket.on(SOCKET_EVENTS.MATCH_START, ({ mazeSeed: seed }: { startedAt?: string; mazeSeed?: number }) => {
+      setCountdown(null);
+      setStarted(true);
+      if (seed !== undefined) setMazeSeed(seed);
+    });
     socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { players: MatchPlayer[] }) => {
       setMatch((prev) => prev ? { ...prev, players: data.players } : prev);
     });
@@ -223,6 +215,7 @@ function GamePlayPageInner({ params }: PageProps) {
   const myPlayer = match?.players.find((p: any) => p.userId === user?.id);
   const level = (match?.level as GameLevel) || 1;
   const maxPlayers = MAX_PLAYERS_PER_LEVEL[level];
+  const gameDef = getGameByType(gameType);
 
   return (
     <div className="game-page min-h-screen bg-white">
@@ -295,49 +288,21 @@ function GamePlayPageInner({ params }: PageProps) {
           {started && !finished ? (
             <GameTimer seconds={initialGameSeconds} onExpire={handleTimeExpire} />
           ) : match?.status === 'waiting' ? (
-            <div className="flex flex-col items-center gap-3">
-              {isAI && (
-                <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${accent.bgSoft} ${accent.borderSoft} ${accent.textStrong}`}>
-                  🤖 Puzzle generat de AI – întrebări unice!
-                </div>
-              )}
-              {isLabyrinth && (
-                <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${accent.bgSoft} ${accent.borderSoft} ${accent.textStrong}`}>
-                  🌀 Labirinturi: controlează bila cu săgeți, swipe sau drag
-                </div>
-              )}
-              <p className="text-gray-500 text-sm font-medium">
-                {match.players.length === maxPlayers
-                  ? '✅ Toți jucătorii sunt pregătiți!'
-                  : `⏳ Se așteaptă jucători... (${match.players.length}/${maxPlayers})`}
-              </p>
-              <div className="flex items-center gap-2 text-xs font-semibold px-3 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
-                🎯 Nivel {match.level} · max {maxPlayers} jucători · celălalt jucător trebuie să selecteze același nivel
-              </div>
-              <p className="text-gray-400 text-xs">Meciul pornește automat când sunt toți prezenți</p>
-              {allowInvite && match.players.length < maxPlayers && (
-                <button
-                  onClick={() => {
-                    const url = window.location.href;
-                    navigator.clipboard.writeText(url).then(() => {
-                      setLinkCopied(true);
-                      setTimeout(() => setLinkCopied(false), 3000);
-                    });
-                  }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all border ${
-                    linkCopied
-                      ? 'bg-green-50 border-green-300 text-green-700'
-                      : `${accent.bgSoft} ${accent.borderSoft} ${accent.textStrong}`
-                  }`}
-                >
-                  {linkCopied ? (
-                    <><span>✓</span> Link copiat!</>
-                  ) : (
-                    <><span>🔗</span> Invită un prieten</>
-                  )}
-                </button>
-              )}
-            </div>
+            <GameLobbyPanel
+              gameDef={gameDef}
+              match={match}
+              maxPlayers={maxPlayers}
+              isAI={isAI}
+              allowInvite={allowInvite}
+              linkCopied={linkCopied}
+              onCopyLink={() => {
+                const url = window.location.href;
+                navigator.clipboard.writeText(url).then(() => {
+                  setLinkCopied(true);
+                  setTimeout(() => setLinkCopied(false), 3000);
+                });
+              }}
+            />
           ) : null}
         </div>
 
@@ -347,6 +312,7 @@ function GamePlayPageInner({ params }: PageProps) {
           finished={finished}
           level={level}
           puzzle={puzzle}
+          mazeSeed={mazeSeed}
           onProgress={handleProgress}
           onFinish={handleFinish}
         />

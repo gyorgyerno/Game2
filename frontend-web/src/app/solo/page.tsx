@@ -5,6 +5,18 @@ import Link from 'next/link';
 import { SOLO_LEVELS, SoloPuzzle } from '@/lib/soloData';
 import { ArrowLeft, Lock, CheckCircle, PlayCircle, Star } from 'lucide-react';
 
+const AI_THEMES: Array<{ id: string; label: string; emoji: string }> = [
+  { id: 'general',     label: 'General',     emoji: '✨' },
+  { id: 'natura',      label: 'Natură',      emoji: '🌿' },
+  { id: 'sport',       label: 'Sport',       emoji: '⚽' },
+  { id: 'gastronomie', label: 'Mâncare',     emoji: '🍕' },
+  { id: 'geografie',   label: 'Geografie',   emoji: '🌍' },
+  { id: 'stiinta',     label: 'Știință',     emoji: '🔬' },
+  { id: 'film',        label: 'Film',        emoji: '🎬' },
+  { id: 'muzica',      label: 'Muzică',      emoji: '🎵' },
+  { id: 'istorie',     label: 'Istorie',     emoji: '🏛' },
+];
+
 const STORAGE_KEY = 'integrame_solo_completed';
 
 function getCompleted(): Set<string> {
@@ -21,6 +33,7 @@ export default function SoloPage() {
   const router = useRouter();
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
+  const [aiTheme, setAiTheme] = useState('general');
 
   useEffect(() => {
     setCompleted(getCompleted());
@@ -99,6 +112,50 @@ export default function SoloPage() {
               <p className="text-gray-400">
                 Completează puzzle-urile în ordine pentru a debloca nivelele superioare
               </p>
+            </div>
+
+            {/* ── AI Training ── */}
+            <div className="mb-8 rounded-2xl bg-gray-900 border border-purple-500/30 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-purple-600/20 flex items-center justify-center text-xl">🤖</div>
+                <div>
+                  <h3 className="font-bold text-white">Antrenament cu AI</h3>
+                  <p className="text-xs text-gray-400">Puzzle nou generat în timp real, unic de fiecare dată</p>
+                </div>
+              </div>
+
+              {/* Selector temă */}
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {AI_THEMES.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setAiTheme(t.id)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all border ${
+                      aiTheme === t.id
+                        ? 'bg-purple-600 border-purple-500 text-white'
+                        : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-purple-500 hover:text-white'
+                    }`}
+                  >
+                    <span>{t.emoji}</span>
+                    <span>{t.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-5 gap-2">
+                {SOLO_LEVELS.map((lv) => (
+                  <Link
+                    key={lv.level}
+                    href={`/solo/play?id=ai:${lv.level}:${aiTheme}`}
+                    className="rounded-xl py-3 text-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-purple-500 transition-all group"
+                  >
+                    <div className="text-xl font-black group-hover:scale-110 transition-transform" style={{ color: lv.color }}>
+                      {lv.level}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5 truncate px-1">{lv.label}</div>
+                  </Link>
+                ))}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

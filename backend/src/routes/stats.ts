@@ -3,6 +3,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import prisma from '../prisma';
 
 const router = Router();
+const INTEGRAME_SOLO_GAME_TYPE = 'integrame_solo';
 const MAZE_SOLO_GAME_TYPE = 'labirinturi_solo';
 
 // GET /api/stats/me?gameType=integrame&level=1
@@ -14,6 +15,65 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
 
   const stats = await prisma.userGameStats.findMany({ where });
   return res.json(stats);
+});
+
+// GET /api/stats/solo/integrame
+router.get('/solo/integrame', requireAuth, async (req: AuthRequest, res: Response) => {
+  const entries = await prisma.userSoloGameProgress.findMany({
+    where: { userId: req.userId, gameType: INTEGRAME_SOLO_GAME_TYPE },
+    orderBy: [{ level: 'asc' }, { gameIndex: 'asc' }],
+    select: {
+      level: true,
+      gameIndex: true,
+      completedAt: true,
+    },
+  });
+
+  return res.json({
+    completedGames: entries.map((entry) => ({
+      level: entry.level,
+      gameIndex: entry.gameIndex,
+      completedAt: entry.completedAt,
+    })),
+  });
+});
+
+// POST /api/stats/solo/integrame/complete
+router.post('/solo/integrame/complete', requireAuth, async (req: AuthRequest, res: Response) => {
+  const levelRaw = (req.body as { level?: unknown }).level;
+  const gameIndexRaw = (req.body as { gameIndex?: unknown }).gameIndex;
+
+  const level = typeof levelRaw === 'number' ? Math.floor(levelRaw) : Number(levelRaw);
+  const gameIndex = typeof gameIndexRaw === 'number' ? Math.floor(gameIndexRaw) : Number(gameIndexRaw);
+
+  if (!Number.isFinite(level) || level < 1 || level > 5) {
+    return res.status(400).json({ error: 'Nivel invalid' });
+  }
+  if (!Number.isFinite(gameIndex) || gameIndex < 0 || gameIndex > 99) {
+    return res.status(400).json({ error: 'gameIndex invalid' });
+  }
+
+  const progress = await prisma.userSoloGameProgress.upsert({
+    where: {
+      userId_gameType_level_gameIndex: {
+        userId: req.userId!,
+        gameType: INTEGRAME_SOLO_GAME_TYPE,
+        level,
+        gameIndex,
+      },
+    },
+    create: {
+      userId: req.userId!,
+      gameType: INTEGRAME_SOLO_GAME_TYPE,
+      level,
+      gameIndex,
+    },
+    update: {
+      completedAt: new Date(),
+    },
+  });
+
+  return res.json({ ok: true, level, gameIndex, completedAt: progress.completedAt });
 });
 
 // GET /api/stats/solo/maze

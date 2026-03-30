@@ -20,6 +20,12 @@ export interface GamePlayProps {
    */
   puzzle: CrosswordPuzzle;
   /**
+   * Seed pentru generarea deterministă a labirintului.
+   * Trimis de backend în MATCH_START — garantează că ambii jucători văd același labirint.
+   * Ignorat de jocurile non-maze.
+   */
+  mazeSeed?: number;
+  /**
    * Apelat de fiecare dată când jucătorul face progres
    * (răspuns corect sau greșit).
    */

@@ -1,11 +1,12 @@
 'use client';
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import MazePlay from '@/games/maze/MazePlay';
+import dynamic from 'next/dynamic';
+const MazePlay = dynamic(() => import('@/games/maze/MazePlay'), { ssr: false });
 import GameTimer from '@/components/game/GameTimer';
 import { SAMPLE_INTEGRAMA } from '@/lib/puzzles';
-import { GAME_RULES } from '@integrame/shared';
+import { gamesApi } from '@/lib/api';
 import { syncMazeLevelCompletion } from '@/store/mazeSoloProgress';
 
 type MazeShapeVariant = 'rectangle' | 'circle' | 'triangle' | 'hexagon';
@@ -20,7 +21,7 @@ const SHAPES: Array<{ id: MazeShapeVariant; label: string; emoji: string }> = [
 function LabirinturiSoloPlayInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const level = Math.min(5, Math.max(1, parseInt(searchParams.get('level') || '1', 10)));
+  const level = Math.max(1, parseInt(searchParams.get('level') || '1', 10));
   const game = Math.min(3, Math.max(0, parseInt(searchParams.get('game') || '0', 10)));
   const shapeParam = searchParams.get('shape');
   const shape = SHAPES.find((entry) => entry.id === shapeParam)?.id ?? SHAPES[game]?.id ?? 'rectangle';
@@ -30,7 +31,30 @@ function LabirinturiSoloPlayInner() {
   const [score, setScore] = useState(0);
   const [mistakes, setMistakes] = useState(0);
 
-  const seconds = useMemo(() => GAME_RULES['labirinturi']?.timeLimit ?? 60, []);
+  // Seed-ul în URL → pe refresh același labirint; "Joacă din nou" → seed nou
+  const seedParam = searchParams.get('seed');
+  const [mazeSeed, setMazeSeed] = useState<number>(() => {
+    if (seedParam !== null) {
+      const n = parseInt(seedParam, 10);
+      if (!isNaN(n) && n > 0) return n;
+    }
+    return Math.floor(Math.random() * 2_147_483_647) + 1;
+  });
+  const didInjectSeed = useRef(false);
+  useEffect(() => {
+    if (!didInjectSeed.current && !searchParams.get('seed')) {
+      didInjectSeed.current = true;
+      router.replace(`/labirinturi/play?level=${level}&game=${game}&shape=${shape}&seed=${mazeSeed}`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [seconds, setSeconds] = useState<number | null>(null);
+  useEffect(() => {
+    gamesApi.getRules('labirinturi')
+      .then(res => setSeconds(res.data.timeLimit))
+      .catch(() => setSeconds(60));
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -42,28 +66,35 @@ function LabirinturiSoloPlayInner() {
           <h1 className="text-2xl font-bold tracking-tight">Labirinturi · Nivel {level} · Joc {game + 1}</h1>
           <span className="text-sm text-emerald-300 font-semibold">{shapeMeta.emoji} {shapeMeta.label}</span>
           <div className="ml-auto">
-            {!finished && <GameTimer seconds={seconds} onExpire={() => {
-              if (score > 0) {
-                syncMazeLevelCompletion(level, game, score);
-              }
-              setFinished(true);
-            }} />}
+            {!finished && seconds !== null && seconds > 0 && (
+              <GameTimer key={mazeSeed} seconds={seconds} onExpire={() => {
+                if (score > 0) {
+                  syncMazeLevelCompletion(level, game, score);
+                }
+                setFinished(true);
+              }} />
+            )}
+            {!finished && seconds === 0 && (
+              <span className="text-emerald-400 font-semibold text-sm">∞ Fără limită de timp</span>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 py-6">
+      <div className="max-w-5xl mx-auto px-4 py-6 flex flex-col items-center">
         {finished && (
-          <div className="mb-4 rounded-2xl border border-emerald-500/40 bg-emerald-900/20 p-4 text-sm">
+          <div className="w-full mb-4 rounded-2xl border border-emerald-500/40 bg-emerald-900/20 p-4 text-sm">
             <p className="font-semibold text-emerald-300">Nivel încheiat ✅</p>
             <p className="text-slate-300 mt-1">Scor: <span className="font-bold">{score}</span> · Pereți loviți: <span className="font-bold">{mistakes}</span></p>
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => {
+                  const newSeed = Math.floor(Math.random() * 2_147_483_647) + 1;
+                  setMazeSeed(newSeed);
                   setFinished(false);
                   setScore(0);
                   setMistakes(0);
-                  router.replace(`/labirinturi/play?level=${level}&game=${game}&shape=${shape}`);
+                  router.replace(`/labirinturi/play?level=${level}&game=${game}&shape=${shape}&seed=${newSeed}`);
                 }}
                 className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold"
               >
@@ -77,10 +108,12 @@ function LabirinturiSoloPlayInner() {
         )}
 
         <MazePlay
+          key={mazeSeed}
           started={!finished}
           finished={finished}
           level={level}
           shapeVariant={shape}
+          mazeSeed={mazeSeed}
           puzzle={SAMPLE_INTEGRAMA}
           onProgress={(correct, wrong) => {
             setScore(correct);

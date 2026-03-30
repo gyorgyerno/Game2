@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { gameRegistry } from '../games/GameRegistry';
 import prisma from '../prisma';
+import { gameLevelConfigService } from '../services/GameLevelConfigService';
 
 const router = Router();
 
@@ -85,6 +86,37 @@ router.get('/', async (req, res) => {
     .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
 
   return res.json(games);
+});
+
+// GET /api/games/levels/:gameType — config publică a nivelelor (fără auth)
+// Returnează: [{ level, displayName, winsToUnlock, gamesPerLevel, maxPlayers }]
+router.get('/levels/:gameType', async (req, res) => {
+  const { gameType } = req.params as { gameType: string };
+  const levels = gameLevelConfigService.getActiveLevels(gameType);
+  return res.json(
+    levels.map((l) => ({
+      level: l.level,
+      displayName: l.displayName,
+      winsToUnlock: l.winsToUnlock,
+      gamesPerLevel: l.gamesPerLevel,
+      maxPlayers: l.maxPlayers,
+    }))
+  );
+});
+
+// GET /api/games/rules/:gameType — reguli efective (cu override-uri admin)
+router.get('/rules/:gameType', (req, res) => {
+  const { gameType } = req.params as { gameType: string };
+  const rules = gameRegistry.getEffectiveRules(gameType);
+  if (!rules) return res.status(404).json({ error: 'Game not found' });
+  return res.json({
+    timeLimit: rules.timeLimit,
+    pointsPerCorrect: rules.pointsPerCorrect,
+    pointsPerMistake: rules.pointsPerMistake,
+    bonusCompletion: rules.bonusCompletion,
+    bonusFirstFinisher: rules.bonusFirstFinisher,
+    forfeitBonus: rules.forfeitBonus,
+  });
 });
 
 export default router;

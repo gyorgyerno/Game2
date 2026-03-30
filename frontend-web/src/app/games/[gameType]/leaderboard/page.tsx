@@ -3,24 +3,37 @@ import { Suspense } from 'react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Trophy, ChevronDown } from 'lucide-react';
-import { leaderboardApi } from '@/lib/api';
-import { LeaderboardEntry, GameLevel, MAX_PLAYERS_PER_LEVEL } from '@integrame/shared';
+import { Trophy } from 'lucide-react';
+import { leaderboardApi, api } from '@/lib/api';
+import { LeaderboardEntry } from '@integrame/shared';
 import clsx from 'clsx';
 
 interface PageProps {
   params: { gameType: string };
 }
 
-const LEVEL_LABELS: Record<number, string> = { 1: 'Nivel 1', 2: 'Nivel 2', 3: 'Nivel 3', 4: 'Nivel 4', 5: 'Nivel 5' };
+type PublicLevelConfig = {
+  level: number;
+  displayName: string;
+  maxPlayers: number;
+  winsToUnlock: number;
+  gamesPerLevel: number;
+};
 
 function LeaderboardPageInner({ params }: PageProps) {
   const { gameType } = params;
   const searchParams = useSearchParams();
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [levelConfigs, setLevelConfigs] = useState<PublicLevelConfig[]>([]);
   const [level, setLevel] = useState<number>(parseInt(searchParams.get('level') || '1'));
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    api.get<PublicLevelConfig[]>(`/games/levels/${gameType}`)
+      .then((r) => setLevelConfigs([...r.data].sort((a, b) => a.level - b.level)))
+      .catch(() => {});
+  }, [gameType]);
 
   useEffect(() => {
     setLoading(true);
@@ -43,22 +56,22 @@ function LeaderboardPageInner({ params }: PageProps) {
         <div className="w-24" />
       </nav>
 
-      <main className="max-w-2xl mx-auto px-4 py-8">
+      <main className="max-w-5xl mx-auto px-4 py-8">
         {/* Level filter */}
         <div className="flex gap-2 mb-6 flex-wrap">
-          {([1, 2, 3, 4, 5] as GameLevel[]).map((l) => (
+          {levelConfigs.map((cfg) => (
             <button
-              key={l}
-              onClick={() => { setLevel(l); setPage(1); }}
+              key={cfg.level}
+              onClick={() => { setLevel(cfg.level); setPage(1); }}
               className={clsx(
                 'px-4 py-1.5 rounded-full text-sm font-medium transition',
-                l === level
+                cfg.level === level
                   ? 'bg-violet-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               )}
             >
-              {LEVEL_LABELS[l]}
-              <span className="text-[10px] ml-1 opacity-60">max {MAX_PLAYERS_PER_LEVEL[l]}</span>
+              {cfg.displayName}
+              <span className="text-[10px] ml-1 opacity-60">max {cfg.maxPlayers}</span>
             </button>
           ))}
         </div>

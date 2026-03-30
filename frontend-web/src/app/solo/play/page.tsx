@@ -4,9 +4,49 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import CrosswordGrid, { CrosswordWord } from '@/components/game/CrosswordGrid';
 import LetterTiles from '@/components/game/LetterTiles';
-import { getPuzzleById, getLevelForPuzzle, getNextPuzzle, SoloPuzzle } from '@/lib/soloData';
+import { getPuzzleById, getLevelForPuzzle, getNextPuzzle, SOLO_LEVELS, SoloPuzzle } from '@/lib/soloData';
 import { shuffleLetters } from '@/lib/puzzles';
+import { api } from '@/lib/api';
 import { ArrowLeft, Trophy, ChevronRight, RotateCcw, HelpCircle } from 'lucide-react';
+
+// ── AI puzzle types (mirrors CrosswordPuzzle from backend) ──────────────────
+interface AICrosswordWord {
+  id: number;
+  word: string;
+  clue: string;
+  row: number;
+  col: number;
+  direction: 'horizontal' | 'vertical';
+}
+interface AICrosswordPuzzle {
+  title: string;
+  rows: number;
+  cols: number;
+  mainCol: number;
+  words: AICrosswordWord[];
+}
+
+function aiPuzzleToSoloPuzzle(ap: AICrosswordPuzzle): SoloPuzzle {
+  const verticalWord = ap.words.find((w) => w.direction === 'vertical');
+  const horizontalWords = ap.words.filter((w) => w.direction === 'horizontal');
+  const minRow = horizontalWords.length > 0 ? Math.min(...horizontalWords.map((w) => w.row)) : 0;
+  const normalizedWords = horizontalWords.map((w, i) => ({
+    ...w,
+    id: i + 1,
+    row: w.row - minRow,
+    direction: 'horizontal' as const,
+  }));
+  return {
+    id: `ai-${Date.now()}`,
+    title: ap.title,
+    secretWord: verticalWord?.word ?? '',
+    secretClue: verticalWord?.clue ?? '',
+    rows: ap.rows,
+    cols: ap.cols,
+    mainCol: ap.mainCol,
+    words: normalizedWords,
+  };
+}
 
 const STORAGE_KEY = 'integrame_solo_completed';
 
@@ -40,6 +80,8 @@ function SoloPlayInner() {
   const [secretRevealed, setSecretRevealed] = useState<string[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const [gridKey, setGridKey] = useState(0);           // force grid reset
+  const [isAiGenerating, setIsAiGenerating] = useState(false);
+  const [aiPuzzleLevel, setAiPuzzleLevel] = useState(1);
 
   // Timer
   useEffect(() => {
@@ -50,24 +92,50 @@ function SoloPlayInner() {
 
   // Load puzzle
   useEffect(() => {
+    function applyPuzzle(p: SoloPuzzle) {
+      setPuzzle(p);
+      setGameState('playing');
+      setWordsCompleted(0);
+      setSecretRevealed([]);
+      const timerKey = `solo_timer_${p.id}`;
+      const saved = sessionStorage.getItem(timerKey);
+      if (saved) {
+        setElapsed(Math.floor((Date.now() - parseInt(saved)) / 1000));
+      } else {
+        sessionStorage.setItem(timerKey, Date.now().toString());
+        setElapsed(0);
+      }
+    }
+
+    if (puzzleId.startsWith('ai:')) {
+      const parts = puzzleId.split(':');
+      const level = parseInt(parts[1] ?? '1', 10) || 1;
+      const theme = parts[2] ?? 'general';
+      setAiPuzzleLevel(level);
+      setIsAiGenerating(true);
+
+      api
+        .post<AICrosswordPuzzle>('/ai/generate-puzzle', { level, theme })
+        .then((res) => {
+          applyPuzzle(aiPuzzleToSoloPuzzle(res.data));
+        })
+        .catch(() => {
+          // Fallback: primul puzzle static al nivelului
+          const levelPuzzles = SOLO_LEVELS.find((l) => l.level === level)?.puzzles;
+          const fallback = levelPuzzles?.[0] ?? getPuzzleById('L1P1');
+          if (fallback) applyPuzzle(fallback);
+          else router.replace('/solo');
+        })
+        .finally(() => setIsAiGenerating(false));
+      return;
+    }
+
     const p = getPuzzleById(puzzleId);
     if (!p) {
       router.replace('/solo');
       return;
     }
-    setPuzzle(p);
-    setGameState('playing');
-    setWordsCompleted(0);
-    setSecretRevealed([]);
-    // Restore timer from sessionStorage to survive page refreshes
-    const timerKey = `solo_timer_${puzzleId}`;
-    const saved = sessionStorage.getItem(timerKey);
-    if (saved) {
-      setElapsed(Math.floor((Date.now() - parseInt(saved)) / 1000));
-    } else {
-      sessionStorage.setItem(timerKey, Date.now().toString());
-      setElapsed(0);
-    }
+    applyPuzzle(p);
   }, [puzzleId]);
 
   // Update shuffled letters when active word changes
@@ -139,13 +207,18 @@ function SoloPlayInner() {
   if (!puzzle) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white">
-        <div className="animate-pulse text-xl">Se încarcă puzzle-ul…</div>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full" />
+          <div className="animate-pulse text-xl">
+            {isAiGenerating ? 'Se pregătește puzzle-ul cu AI… ✨' : 'Se încarcă puzzle-ul…'}
+          </div>
+        </div>
       </div>
     );
   }
 
-  const levelNo = getLevelForPuzzle(puzzle.id);
-  const nextPuzzle = getNextPuzzle(puzzle.id);
+  const levelNo = puzzle.id.startsWith('ai-') ? aiPuzzleLevel : getLevelForPuzzle(puzzle.id);
+  const nextPuzzle = puzzle.id.startsWith('ai-') ? null : getNextPuzzle(puzzle.id);
   const totalWords = puzzle.words.length;
 
   return (

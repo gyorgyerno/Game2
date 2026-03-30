@@ -27,6 +27,7 @@ import { botChatGenerator } from './services/simulatedPlayers/BotChatGenerator';
 import { runtimeMetricsMonitor } from './services/simulatedPlayers/RuntimeMetricsMonitor';
 import { gameRegistry } from './games/GameRegistry';
 import { systemConfigService } from './services/SystemConfigService';
+import { gameLevelConfigService } from './services/GameLevelConfigService';
 
 const app = express();
 const server = http.createServer(app);
@@ -128,6 +129,14 @@ server.listen(config.port, async () => {
     logger.info('✅ System config (ELO/XP/Ligi) încărcat din DB');
   } catch (err) {
     logger.error('❌ System config load eșuat', { err });
+  }
+
+  // Încarcă configurația nivelelor din DB (seed automat dacă e gol)
+  try {
+    await gameLevelConfigService.load(prisma);
+    logger.info('✅ Game level configs încărcate din DB');
+  } catch (err) {
+    logger.error('❌ Game level configs load eșuat', { err });
   }
 });
 

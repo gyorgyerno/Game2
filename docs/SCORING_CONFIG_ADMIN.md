@@ -201,3 +201,81 @@ Body: orice subset din pragurile de ligă. Validează ordinea `silver < gold < p
 - Backend-ul ține override-urile **în memorie** (`Map`) pentru performanță, sincronizate cu DB la startup și după fiecare save/delete din admin.
 - SQLite tratează `NULL` ca distincte în unique indexes → am folosit `findFirst + create/update` în loc de `upsert` pentru `level = null`.
 - Câmpurile `null` în DB înseamnă "nu există override, folosește default-ul din cod" — nu suprascriem cu 0.
+
+---
+
+## Manager Nivele și Solo Progress
+
+**Implementat:** 2026-03-27
+
+Pagina `http://localhost:3000/admin/settings` include acum și zona `Manager Nivele`, unde adminul poate configura nivelurile per joc fără modificări de cod.
+
+### Câmpuri configurabile per nivel
+
+| Câmp | Sensul |
+|---|---|
+| `displayName` | Numele afișat pentru nivel |
+| `difficultyValue` | Dificultate 0–100 |
+| `isActive` | Dacă nivelul este vizibil și poate fi folosit |
+| `maxPlayers` | Număr maxim de jucători pentru meciurile multiplayer |
+| `winsToUnlock` | Victorii necesare pentru a debloca nivelul următor în multiplayer |
+| `gamesPerLevel` | Număr de jocuri disponibile în solo pentru nivelul respectiv |
+
+### Comportament pentru Integrame solo
+
+- `gamesPerLevel` este expus public prin `GET /api/games/levels/:gameType` și este folosit în:
+  - selectorul de nivele din `/integrame`
+  - ecranul de joc `/integrame/play`
+  - cardurile Solo din dashboard
+- Dacă adminul configurează mai multe jocuri decât există puzzle-uri publicate pentru acel nivel, UI-ul afișează doar puzzle-urile reale și marchează restul ca `În curând`.
+
+### Persistență progres solo per user
+
+Integrame solo nu mai este doar `localStorage-only`.
+
+- progresul completării jocurilor este salvat local pentru fallback rapid
+- dacă utilizatorul este autentificat, progresul este sincronizat și în DB
+- la încărcarea paginilor solo, progresul este hidratat din backend și îmbinat cu progresul local
+
+### Fișiere modificate (niveluri + solo progress)
+
+#### Backend
+
+| Fișier | Ce s-a schimbat |
+|---|---|
+| `prisma/schema.prisma` | `GameLevelConfig.gamesPerLevel`, model nou `UserSoloGameProgress` |
+| `prisma/migrations/20260327143227_add_games_per_level/` | Migrare pentru `gamesPerLevel` |
+| `prisma/migrations/20260327145132_add_user_solo_game_progress/` | Migrare pentru progres solo per joc |
+| `src/services/GameLevelConfigService.ts` | cache + defaults + upsert pentru `winsToUnlock` și `gamesPerLevel` |
+| `src/routes/admin.ts` | validare și update admin pentru `gamesPerLevel` |
+| `src/routes/games.ts` | endpoint public de nivele extins cu `gamesPerLevel` |
+| `src/routes/stats.ts` | endpoint-uri noi pentru progres Integrame solo |
+
+#### Frontend
+
+| Fișier | Ce s-a schimbat |
+|---|---|
+| `src/app/admin/settings/page.tsx` | UI extins pentru manager niveluri, full width, input `gamesPerLevel` |
+| `src/store/gameProgress.ts` | store local + sync/hydrate backend pentru Integrame solo |
+| `src/app/integrame/page.tsx` | respectă `gamesPerLevel` și fallback-ul `În curând` |
+| `src/app/integrame/play/page.tsx` | blochează jocuri inexistente și sincronizează progresul la final |
+| `src/app/dashboard/page.tsx` | folosește progresul hidratat și `gamesPerLevel` per nivel |
+| `src/lib/api.ts` | metode noi pentru stats solo Integrame |
+
+### API nou pentru Integrame solo
+
+#### `GET /api/stats/solo/integrame`
+Returnează jocurile solo finalizate de userul curent.
+
+```json
+{
+  "completedGames": [
+    { "level": 1, "gameIndex": 0, "completedAt": "2026-03-27T12:00:00.000Z" }
+  ]
+}
+```
+
+#### `POST /api/stats/solo/integrame/complete`
+Body: `{ level: number, gameIndex: number }`
+
+Marchează jocul solo ca finalizat pentru userul autentificat. Este idempotent la nivel de `(userId, gameType, level, gameIndex)`.

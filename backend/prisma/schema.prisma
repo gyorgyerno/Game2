@@ -28,6 +28,7 @@ model User {
 
   matchPlayers MatchPlayer[]
   gameStats    UserGameStats[]
+  soloGameProgress UserSoloGameProgress[]
   invitesCreated Invite[]     @relation("InviteCreator")
   sentFriendships     Friendship[] @relation("FriendshipSender")
   receivedFriendships Friendship[] @relation("FriendshipReceiver")
@@ -147,6 +148,23 @@ model UserGameStats {
 
   @@unique([userId, gameType, level], name: "userId_gameType_level")
   @@map("user_game_stats")
+}
+
+// ─── UserSoloGameProgress ────────────────────────────────────────────────────
+// Progres solo per joc individual (ex: integrame solo, joc 2 din nivelul 3).
+model UserSoloGameProgress {
+  id          String   @id @default(uuid())
+  userId      String
+  gameType    String
+  level       Int
+  gameIndex   Int
+  completedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, gameType, level, gameIndex], name: "userId_gameType_level_gameIndex")
+  @@index([userId, gameType, level])
+  @@map("user_solo_game_progress")
 }
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
@@ -307,6 +325,71 @@ model GameScoringConfig {
   @@unique([gameType, level], name: "gameType_level")
   @@index([gameType])
   @@map("game_scoring_configs")
+}
+
+// ─── GameLevelConfig ──────────────────────────────────────────────────────────
+// Configurează nivelele unui joc din admin: denumire, dificultate, nr. jucători.
+// difficultyValue: 0–100 (0 = ușor, 100 = foarte greu) — folosit de generatorul AI
+// și de labirint pentru a calcula dimensiunea hărții.
+// isActive: false → nivelul nu mai apare în UI și nu se pot crea meciuri pe el.
+model GameLevelConfig {
+  id              String   @id @default(cuid())
+  gameType        String
+  level           Int
+  displayName     String   @default("")
+  difficultyValue Int      @default(50)
+  isActive        Boolean  @default(true)
+  maxPlayers      Int      @default(2)
+  winsToUnlock    Int      @default(5)  // câte victorii sunt necesare pentru a debloca nivelul următor
+  gamesPerLevel   Int      @default(3)  // câte jocuri/puzzle-uri sunt în nivelul solo
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  updatedBy       String?
+
+  @@unique([gameType, level])
+  @@index([gameType, isActive])
+  @@map("game_level_configs")
+}
+
+// ─── BonusChallenge ───────────────────────────────────────────────────────────
+// Componente de bonus configurabile per joc.
+// gameType: 'integrame' | 'labirinturi' | '*' (toate jocurile)
+// challengeType: 'PLAY_N_TIMES' | 'WIN_N_TIMES' | 'WIN_STREAK' | 'SCORE_N_POINTS'
+// requiredValue: pragul de activare (ex: 20 partide)
+// bonusPoints: câte puncte primește jucătorul la atingerea pragului
+// Fiecare jucător poate obține bonus-ul O singură dată per challenge.
+model BonusChallenge {
+  id            String   @id @default(cuid())
+  gameType      String   // 'integrame' | 'labirinturi' | '*'
+  challengeType String
+  label         String
+  requiredValue Int
+  bonusPoints   Int
+  isActive      Boolean  @default(true)
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  awards BonusChallengeAward[]
+
+  @@index([gameType, isActive])
+  @@map("bonus_challenges")
+}
+
+// ─── BonusChallengeAward ──────────────────────────────────────────────────────
+// Înregistrează că un jucător a primit deja bonus-ul pentru un challenge.
+// Un user poate primi același challenge o singură dată (@@unique).
+model BonusChallengeAward {
+  id               String   @id @default(cuid())
+  userId           String
+  bonusChallengeId String
+  awardedPoints    Int
+  awardedAt        DateTime @default(now())
+
+  challenge BonusChallenge @relation(fields: [bonusChallengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bonusChallengeId])
+  @@map("bonus_challenge_awards")
 }
 
 // ─── BannedIP ─────────────────────────────────────────────────────────────────

@@ -111,6 +111,10 @@ export const statsApi = {
     api.get('/stats/me', { params: { gameType, level } }),
   getUserStats: (userId: string, gameType?: string, level?: number) =>
     api.get(`/stats/${userId}`, { params: { gameType, level } }),
+  getIntegrameSoloProgress: () =>
+    api.get('/stats/solo/integrame'),
+  completeIntegrameSoloGame: (level: number, gameIndex: number) =>
+    api.post('/stats/solo/integrame/complete', { level, gameIndex }),
   getMazeSoloProgress: () =>
     api.get('/stats/solo/maze'),
   completeMazeSoloLevel: (level: number, score: number) =>
@@ -139,5 +143,6 @@ export const friendsApi = {
 
 // ─── Games catalog ───────────────────────────────────────────────────────────
 export const gamesApi = {
-  getAll: () => api.get('/games'),
+  getAll:       ()             => api.get('/games'),
+  getRules:     (gameType: string) => api.get<{ timeLimit: number; pointsPerCorrect: number; pointsPerMistake: number; bonusCompletion: number; bonusFirstFinisher: number; forfeitBonus: number }>(`/games/rules/${gameType}`),
 };

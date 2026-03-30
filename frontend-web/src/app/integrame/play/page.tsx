@@ -3,9 +3,10 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import CrosswordGrid from '@/components/game/CrosswordGrid';
 import type { CrosswordWord } from '@/components/game/CrosswordGrid';
-import { getPuzzle, LEVEL_NAMES } from '@/lib/puzzleData';
-import { isUnlocked, markCompleted } from '@/store/gameProgress';
+import { getPuzzle, LEVEL_NAMES, PUZZLES_BY_LEVEL } from '@/lib/puzzleData';
+import { hydrateIntegrameProgressFromServer, isUnlocked, syncIntegrameGameCompletion } from '@/store/gameProgress';
 import { useAuthStore } from '@/store/auth';
+import { api } from '@/lib/api';
 import '../../globals-game.css';
 
 function shuffle<T>(arr: T[]): T[] {
@@ -24,12 +25,13 @@ interface CompleteProps {
   totalCount: number;
   level: number;
   gameIndex: number;
+  gamesPerLevel: number;
   onNext: () => void;
   onMenu: () => void;
 }
 
-function CompleteOverlay({ secret, correctCount, totalCount, level, gameIndex, onNext, onMenu }: CompleteProps) {
-  const isLast = gameIndex === 2;
+function CompleteOverlay({ secret, correctCount, totalCount, level, gameIndex, gamesPerLevel, onNext, onMenu }: CompleteProps) {
+  const isLast = gameIndex >= gamesPerLevel - 1;
   const pct = Math.round((correctCount / totalCount) * 100);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -81,11 +83,35 @@ function PlayContent() {
   const level = Number(params.get('level') ?? '1');
   const gameIndex = Number(params.get('game') ?? '0');
   const puzzle = getPuzzle(level, gameIndex);
+  const availableGamesCount = PUZZLES_BY_LEVEL[level]?.length ?? 0;
+  const availablePrevLevelGamesCount = PUZZLES_BY_LEVEL[level - 1]?.length ?? 0;
+
+  // levels config and hydrated progress
+  const [progressReady, setProgressReady] = useState(false);
+  const [levelGamesConfig, setLevelGamesConfig] = useState<Record<number, number>>({});
+  useEffect(() => {
+    api.get<Array<{ level: number; gamesPerLevel: number }>>('/games/levels/integrame')
+      .then((r) => {
+        const map: Record<number, number> = {};
+        for (const item of r.data) map[item.level] = item.gamesPerLevel;
+        setLevelGamesConfig(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    hydrateIntegrameProgressFromServer()
+      .catch(() => {})
+      .finally(() => setProgressReady(true));
+  }, []);
 
   // Redirect if locked
   useEffect(() => {
-    if (!isUnlocked(level, gameIndex)) router.replace('/integrame');
-  }, [level, gameIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!progressReady) return;
+    const prevLevelGames = levelGamesConfig[level - 1] ?? 3;
+    const effectivePrevLevelGames = Math.min(prevLevelGames, Math.max(availablePrevLevelGamesCount, 1));
+    if (!puzzle || !isUnlocked(level, gameIndex, effectivePrevLevelGames)) router.replace('/integrame');
+  }, [availablePrevLevelGamesCount, gameIndex, level, levelGamesConfig, progressReady, puzzle, router]);
 
   // Timer (count-up)
   const [elapsed, setElapsed] = useState(0);
@@ -144,7 +170,7 @@ function PlayContent() {
   }, []);
 
   const handleAllComplete = useCallback((correct: number, total: number) => {
-    markCompleted(level, gameIndex);
+    void syncIntegrameGameCompletion(level, gameIndex);
     sessionStorage.removeItem(`integrame_timer_${level}_${gameIndex}`);
     setTimerActive(false);
     setCompleteData({ correct, total });
@@ -159,6 +185,8 @@ function PlayContent() {
   const totalWords = puzzle.words.length;
   const doneCount = completedWordIds.size;
   const avatarUrl = user?.avatarUrl || `https://api.dicebear.com/8.x/bottts/svg?seed=${user?.username ?? 'guest'}`;
+  const configuredGamesPerLevel = levelGamesConfig[level] ?? 3;
+  const gamesPerLevel = Math.min(configuredGamesPerLevel, availableGamesCount || configuredGamesPerLevel);
   const mins = Math.floor(elapsed / 60);
   const secs = elapsed % 60;
   const timerStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
@@ -284,6 +312,7 @@ function PlayContent() {
           totalCount={completeData.total}
           level={level}
           gameIndex={gameIndex}
+          gamesPerLevel={gamesPerLevel}
           onNext={() => {
             setCompleteData(null);
             setCompletedWordIds(new Set());

@@ -2,8 +2,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PUZZLES_BY_LEVEL, LEVEL_NAMES, LEVEL_WORD_COUNTS } from '@/lib/puzzleData';
-import { isUnlocked, isCompleted } from '@/store/gameProgress';
+import { PUZZLES_BY_LEVEL, LEVEL_WORD_COUNTS } from '@/lib/puzzleData';
+import { hydrateIntegrameProgressFromServer, isUnlocked, isCompleted } from '@/store/gameProgress';
+import { api } from '@/lib/api';
 
 const LEVEL_COLORS = [
   'from-emerald-500 to-teal-600',
@@ -23,11 +24,41 @@ const LEVEL_LOCK_BG = [
 
 const LEVEL_ICONS = ['⭐', '⭐⭐', '⭐⭐⭐', '⭐⭐⭐⭐', '⭐⭐⭐⭐⭐'];
 
+type IntegrameLevelConfig = {
+  level: number;
+  displayName: string;
+  gamesPerLevel: number;
+  winsToUnlock: number;
+};
+
+const DEFAULT_INTEGRAME_LEVELS: IntegrameLevelConfig[] = [1, 2, 3, 4, 5].map((l) => ({
+  level: l,
+  displayName: `Nivel ${l}`,
+  gamesPerLevel: 3,
+  winsToUnlock: 3,
+}));
+
 export default function IntegramePage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
-  // After mount, localStorage is available client-side
-  useEffect(() => { setMounted(true); }, []);
+  const [progressLoaded, setProgressLoaded] = useState(false);
+  const [levelConfigs, setLevelConfigs] = useState<IntegrameLevelConfig[]>(DEFAULT_INTEGRAME_LEVELS);
+
+  useEffect(() => {
+    setMounted(true);
+    hydrateIntegrameProgressFromServer()
+      .catch(() => {})
+      .finally(() => setProgressLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    api.get<Array<{ level: number; displayName: string; gamesPerLevel: number; winsToUnlock: number }>>('/games/levels/integrame')
+      .then((r) => {
+        if (!Array.isArray(r.data) || r.data.length === 0) return;
+        setLevelConfigs([...r.data].sort((a, b) => a.level - b.level));
+      })
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -47,14 +78,26 @@ export default function IntegramePage() {
         </p>
 
         <div className="grid gap-6">
-          {[1, 2, 3, 4, 5].map((level, idx) => {
-            const puzzles = PUZZLES_BY_LEVEL[level] ?? [];
+          {levelConfigs.map((cfg, idx) => {
+            const level = cfg.level;
+            const allPuzzles = PUZZLES_BY_LEVEL[level] ?? [];
+            const configuredGamesCount = cfg.gamesPerLevel;
+            const availableGamesCount = allPuzzles.length;
+            const effectiveGamesCount = Math.min(configuredGamesCount, availableGamesCount);
+            const puzzles = allPuzzles.slice(0, effectiveGamesCount);
+            const missingGamesCount = Math.max(0, configuredGamesCount - availableGamesCount);
             const wordCount = LEVEL_WORD_COUNTS[level];
-            const levelName = LEVEL_NAMES[level];
-            const gradient = LEVEL_COLORS[idx];
-            const lockBg = LEVEL_LOCK_BG[idx];
-            const levelUnlocked = !mounted ? (level === 1) : isUnlocked(level, 0);
-            const levelDone = mounted && puzzles.every((_, gi) => isCompleted(level, gi));
+            const levelName = cfg.displayName;
+            const gradient = LEVEL_COLORS[idx % LEVEL_COLORS.length];
+            const lockBg = LEVEL_LOCK_BG[idx % LEVEL_LOCK_BG.length];
+            // Determine how many wins from prev level are needed to unlock this level
+            const prevCfg = levelConfigs.find((c) => c.level === level - 1);
+            const prevEffective = prevCfg ? Math.min(prevCfg.gamesPerLevel, (PUZZLES_BY_LEVEL[prevCfg.level] ?? []).length) : 0;
+            const requiredWins = Math.min(cfg.winsToUnlock, prevEffective || cfg.winsToUnlock);
+            const levelUnlocked = !mounted || !progressLoaded
+              ? (level === levelConfigs[0]?.level)
+              : isUnlocked(level, 0, requiredWins);
+            const levelDone = mounted && progressLoaded && puzzles.every((_, gi) => isCompleted(level, gi));
 
             return (
               <div
@@ -72,22 +115,27 @@ export default function IntegramePage() {
                     </h2>
                   </div>
                   <div className="text-right">
-                    {levelUnlocked ? (
-                      <>
-                        <div className="text-white text-sm">{LEVEL_ICONS[idx]}</div>
-                        <div className="text-white/80 text-xs mt-0.5">{wordCount} cuvinte</div>
-                      </>
-                    ) : (
-                      <div className="text-3xl">🔒</div>
-                    )}
+                    <div className={`text-sm font-semibold ${levelUnlocked ? 'text-white' : 'text-white/50'}`}>
+                      📝 {configuredGamesCount} jocuri
+                    </div>
+                    <div className={`text-xs mt-0.5 ${levelUnlocked ? 'text-white/80' : 'text-white/40'}`}>
+                      {wordCount} cuvinte/joc
+                    </div>
+                    {!levelUnlocked && <div className="text-lg mt-1">🔒</div>}
                   </div>
                 </div>
+
+                {missingGamesCount > 0 && (
+                  <div className="px-6 py-3 text-xs text-amber-200 bg-amber-950/40 border-t border-amber-500/20">
+                    Configurat: {configuredGamesCount} jocuri. Disponibile acum: {availableGamesCount}. Restul sunt marcate ca in curs de publicare.
+                  </div>
+                )}
 
                 {/* Game buttons */}
                 <div className="px-6 py-4 grid grid-cols-3 gap-3">
                   {puzzles.map((puzzle, gameIdx) => {
-                    const unlocked = !mounted ? (level === 1 && gameIdx === 0) : isUnlocked(level, gameIdx);
-                    const completed = mounted && isCompleted(level, gameIdx);
+                    const unlocked = !mounted || !progressLoaded ? (level === levelConfigs[0]?.level && gameIdx === 0) : isUnlocked(level, gameIdx, requiredWins);
+                    const completed = mounted && progressLoaded && isCompleted(level, gameIdx);
 
                     if (unlocked) {
                       return (
@@ -122,11 +170,27 @@ export default function IntegramePage() {
                       </div>
                     );
                   })}
+
+                  {Array.from({ length: missingGamesCount }, (_, missingIdx) => {
+                    const gameNumber = effectiveGamesCount + missingIdx + 1;
+                    return (
+                      <div
+                        key={`missing-${level}-${gameNumber}`}
+                        className="flex flex-col items-center gap-2 p-4 py-6 rounded-xl bg-amber-950/20 border border-dashed border-amber-700/40 select-none min-h-[120px] justify-center"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-amber-900/50 flex items-center justify-center text-amber-300 text-xl">
+                          …
+                        </div>
+                        <span className="text-sm font-medium text-amber-100">Joc {gameNumber}</span>
+                        <span className="text-xs text-amber-300/80">In curand</span>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {!levelUnlocked && (
                   <div className="px-6 pb-4 text-center text-xs text-slate-600">
-                    Termină toate jocurile din Nivelul {level - 1} pentru a debloca
+                    Completează {requiredWins} {requiredWins === 1 ? 'joc' : 'jocuri'} din Nivelul {level - 1} pentru a debloca
                   </div>
                 )}
               </div>

@@ -20,6 +20,7 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [started, setStarted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [effectiveTimeLimit, setEffectiveTimeLimit] = useState(0);
   const [myCorrect, setMyCorrect] = useState(0);
   const [myMistakes, setMyMistakes] = useState(0);
   const [finished, setFinished] = useState(false);
@@ -33,10 +34,12 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
 
     socket.on(SOCKET_EVENTS.MATCH_STATE, (m: Match) => setMatch(m));
     socket.on(SOCKET_EVENTS.MATCH_COUNTDOWN, ({ countdown: c }: { countdown: number }) => setCountdown(c));
-    socket.on(SOCKET_EVENTS.MATCH_START, () => {
+    socket.on(SOCKET_EVENTS.MATCH_START, (data?: { timeLimit?: number }) => {
+      const tl = data?.timeLimit ?? rules.timeLimit;
       setCountdown(null);
       setStarted(true);
-      setTimeLeft(rules.timeLimit);
+      setEffectiveTimeLimit(tl);
+      setTimeLeft(tl);
     });
     socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { players: MatchPlayer[] }) => {
       setMatch((prev) => prev ? { ...prev, players: data.players } : prev);
@@ -60,7 +63,7 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
 
   // Countdown timer
   useEffect(() => {
-    if (!started || finished) return;
+    if (!started || finished || effectiveTimeLimit === 0) return;
     timerRef.current = setInterval(() => {
       setTimeLeft((t) => {
         if (t <= 1) {
@@ -71,7 +74,7 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
       });
     }, 1000);
     return () => clearInterval(timerRef.current!);
-  }, [started, finished]);
+  }, [started, finished, effectiveTimeLimit]);
 
   // Emit progress on change
   useEffect(() => {
@@ -94,7 +97,7 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
     ? [...match.players].sort((a: any, b: any) => b.score - a.score)
     : [];
 
-  const timerPct = rules.timeLimit > 0 ? (timeLeft / rules.timeLimit) * 100 : 0;
+  const timerPct = effectiveTimeLimit > 0 ? (timeLeft / effectiveTimeLimit) * 100 : 0;
   const timerColor = timeLeft > 30 ? 'bg-brand-500' : timeLeft > 10 ? 'bg-yellow-500' : 'bg-red-500';
 
   if (!match) {
@@ -119,7 +122,7 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
       )}
 
       {/* Timer bar */}
-      {started && (
+      {started && effectiveTimeLimit > 0 && (
         <div>
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5 text-sm text-slate-400">
@@ -135,6 +138,11 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
               style={{ width: `${timerPct}%` }}
             />
           </div>
+        </div>
+      )}
+      {started && effectiveTimeLimit === 0 && (
+        <div className="flex items-center gap-1.5 text-sm text-slate-400">
+          <Clock size={14} /> <span>∞ Fără limită de timp</span>
         </div>
       )}
 

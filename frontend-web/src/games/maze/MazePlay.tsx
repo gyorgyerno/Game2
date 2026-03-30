@@ -18,6 +18,18 @@ interface MazePlayProps extends GamePlayProps {
   shapeVariant?: MazeShapeVariant;
 }
 
+/** LCG deterministă (Numerical Recipes). Returnează float în [0, 1). */
+function makeLCG(seed: number): () => number {
+  let s = seed >>> 0;
+  // Avansăm seedul de câteva ori pentru a evita valorile mici la start
+  s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+  s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+  return function lcgRand(): number {
+    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
 function keyOf(pos: Position): string {
   return `${pos.row}:${pos.col}`;
 }
@@ -61,7 +73,7 @@ function getActiveCells(size: number, shape: MazeShapeVariant): Position[] {
   return cells;
 }
 
-function buildMaze(size: number, activeMap: boolean[][], start: Position): MazeCell[][] {
+function buildMaze(size: number, activeMap: boolean[][], start: Position, rand: () => number): MazeCell[][] {
   const maze: MazeCell[][] = Array.from({ length: size }, () =>
     Array.from({ length: size }, () => ({ top: true, right: true, bottom: true, left: true }))
   );
@@ -94,7 +106,7 @@ function buildMaze(size: number, activeMap: boolean[][], start: Position): MazeC
       continue;
     }
 
-    const next = candidates[Math.floor(Math.random() * candidates.length)];
+    const next = candidates[Math.floor(rand() * candidates.length)];
     const from = maze[current.row][current.col];
     const to = maze[next.nr][next.nc];
 
@@ -126,11 +138,21 @@ function cellCenter(cellSize: number, pos: Position) {
   };
 }
 
-export default function MazePlay({ started, finished, level = 1, onProgress, onFinish, shapeVariant = 'rectangle' }: MazePlayProps) {
+function starPath(cx: number, cy: number, outerR: number, innerR: number): string {
+  const pts: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    const angle = (i * Math.PI) / 5 - Math.PI / 2;
+    const r = i % 2 === 0 ? outerR : innerR;
+    pts.push(`${(cx + r * Math.cos(angle)).toFixed(2)},${(cy + r * Math.sin(angle)).toFixed(2)}`);
+  }
+  return `M${pts.join('L')}Z`;
+}
+
+export default function MazePlay({ started, finished, level = 1, onProgress, onFinish, shapeVariant = 'rectangle', mazeSeed }: MazePlayProps) {
   const mazeSize = level <= 1 ? 9 : level === 2 ? 11 : level === 3 ? 13 : level === 4 ? 15 : 17;
   const bonusCount = level <= 2 ? 2 : level === 3 ? 3 : 4;
   const shouldPenalizeWalls = level >= 4;
-  const cellSize = 24;
+  const cellSize = 32;
 
   const activeCells = useMemo(() => getActiveCells(mazeSize, shapeVariant), [mazeSize, shapeVariant]);
   const activeMap = useMemo(() => {
@@ -143,7 +165,12 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
 
   const start: Position = activeCells[0] ?? { row: 0, col: 0 };
   const exit: Position = activeCells[activeCells.length - 1] ?? { row: mazeSize - 1, col: mazeSize - 1 };
-  const maze = useMemo(() => buildMaze(mazeSize, activeMap, start), [mazeSize, activeMap, start]);
+  // rand() seeded dacă mazeSeed e prezent → ambii jucători generează același labirint
+  // rand() neseeded (Math.random) pentru solo/preview
+  const mazeRand = useMemo(() => (
+    mazeSeed !== undefined ? makeLCG(mazeSeed) : () => Math.random()
+  ), [mazeSeed, mazeSize, shapeVariant]);
+  const maze = useMemo(() => buildMaze(mazeSize, activeMap, start, mazeRand), [mazeSize, activeMap, start, mazeRand]);
   const activeCellCount = activeCells.length || 1;
 
   const [player, setPlayer] = useState<Position>(() => start);
@@ -161,10 +188,11 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
   const FLUSH_PROGRESS_MS = 120;
 
   useEffect(() => {
+    const bonusRand = mazeSeed !== undefined ? makeLCG(mazeSeed + 1) : () => Math.random();
     const occupied = new Set<string>([keyOf(start), keyOf(exit)]);
     const nextBonuses: Position[] = [];
     while (nextBonuses.length < bonusCount) {
-      const pos = activeCells[Math.floor(Math.random() * activeCells.length)] ?? start;
+      const pos = activeCells[Math.floor(bonusRand() * activeCells.length)] ?? start;
       const id = keyOf(pos);
       if (occupied.has(id)) continue;
       occupied.add(id);
@@ -353,26 +381,70 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
   }
 
   return (
-    <div className="flex flex-col items-center gap-6 px-4 pb-24 w-full max-w-3xl">
-      <div className="w-full max-w-xl grid grid-cols-4 gap-2 text-sm">
-        <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-emerald-700 font-semibold">👣 Pași: {steps}</div>
-        <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-amber-700 font-semibold">⭐ Bonusuri: {collected}</div>
-        <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-rose-700 font-semibold">🧱 Pereți: {wallHits}</div>
-        <div className="rounded-xl bg-violet-50 border border-violet-200 px-3 py-2 text-violet-700 font-semibold">🎯 Nivel: {level}</div>
+    <div className="flex flex-col items-center gap-6 px-4 pb-24 w-full max-w-5xl">
+      {/* Stat cards — dark gaming */}
+      <div className="w-full max-w-3xl grid grid-cols-4 gap-2 text-sm">
+        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-emerald-400 font-semibold">👣 Pași: {steps}</div>
+        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-amber-400 font-semibold">⭐ Bonusuri: {collected}</div>
+        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-rose-400 font-semibold">🧱 Pereți: {wallHits}</div>
+        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-violet-400 font-semibold">🎯 Nivel: {level}</div>
       </div>
 
-      <div className="text-sm text-emerald-300 font-semibold">Formă: {shapeVariant === 'rectangle' ? 'Dreptunghi' : shapeVariant === 'circle' ? 'Cerc' : shapeVariant === 'triangle' ? 'Triunghi' : 'Hexagon'}</div>
+      <div className="text-sm text-cyan-400 font-semibold">Formă: {shapeVariant === 'rectangle' ? 'Dreptunghi' : shapeVariant === 'circle' ? 'Cerc' : shapeVariant === 'triangle' ? 'Triunghi' : 'Hexagon'}</div>
 
       <div
-        className="relative bg-emerald-50 border-2 border-emerald-200 rounded-3xl p-4 select-none touch-none"
+        className="relative w-fit bg-slate-950 border-2 border-cyan-900/50 rounded-3xl p-4 select-none touch-none shadow-[0_0_48px_rgba(6,182,212,0.18)]"
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
         <svg
           width={mazeSize * cellSize}
           height={mazeSize * cellSize}
-          className="rounded-2xl bg-white"
+          className="rounded-2xl block"
+          style={{ background: 'linear-gradient(135deg,#0c1a2e 0%,#0a2020 100%)', margin: '0 auto' }}
         >
+          <defs>
+            <filter id="glow-player" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <filter id="glow-exit" x="-80%" y="-80%" width="260%" height="260%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <filter id="glow-bonus" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <filter id="glow-ckpt" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <style>{`
+              @keyframes maze-exit-pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+              @keyframes maze-aura-pulse { 0%,100%{opacity:0.3} 50%{opacity:0.08} }
+              .maze-exit-pulse { animation: maze-exit-pulse 1.4s ease-in-out infinite; }
+              .maze-aura-pulse { animation: maze-aura-pulse 1s ease-in-out infinite; }
+            `}</style>
+          </defs>
+
+          {/* Visited cell trail */}
+          {maze.map((row, rowIndex) =>
+            row.map((_, colIndex) => {
+              if (!activeMap[rowIndex][colIndex]) return null;
+              if (!visited.has(keyOf({ row: rowIndex, col: colIndex }))) return null;
+              return (
+                <rect
+                  key={`tr-${rowIndex}-${colIndex}`}
+                  x={colIndex * cellSize} y={rowIndex * cellSize}
+                  width={cellSize} height={cellSize}
+                  fill="rgba(34,211,238,0.07)"
+                />
+              );
+            })
+          )}
+
+          {/* Walls */}
           {maze.map((row, rowIndex) =>
             row.map((cell, colIndex) => {
               if (!activeMap[rowIndex][colIndex]) return null;
@@ -391,63 +463,71 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
                     if (dir) move(dir);
                   }}
                 >
-                  {cell.top && <line x1={x} y1={y} x2={x + cellSize} y2={y} stroke="#10b981" strokeWidth="2" />}
-                  {cell.right && <line x1={x + cellSize} y1={y} x2={x + cellSize} y2={y + cellSize} stroke="#10b981" strokeWidth="2" />}
-                  {cell.bottom && <line x1={x} y1={y + cellSize} x2={x + cellSize} y2={y + cellSize} stroke="#10b981" strokeWidth="2" />}
-                  {cell.left && <line x1={x} y1={y} x2={x} y2={y + cellSize} stroke="#10b981" strokeWidth="2" />}
+                  {cell.top    && <line x1={x}           y1={y}           x2={x + cellSize} y2={y}           stroke="#22d3ee" strokeWidth="2" />}
+                  {cell.right  && <line x1={x + cellSize} y1={y}           x2={x + cellSize} y2={y + cellSize} stroke="#22d3ee" strokeWidth="2" />}
+                  {cell.bottom && <line x1={x}           y1={y + cellSize} x2={x + cellSize} y2={y + cellSize} stroke="#22d3ee" strokeWidth="2" />}
+                  {cell.left   && <line x1={x}           y1={y}           x2={x}            y2={y + cellSize} stroke="#22d3ee" strokeWidth="2" />}
                 </g>
               );
             })
           )}
 
-          <rect
-            x={exit.col * cellSize + 4}
-            y={exit.row * cellSize + 4}
-            width={cellSize - 8}
-            height={cellSize - 8}
-            rx={6}
-            fill="#a7f3d0"
-            stroke="#059669"
-            strokeWidth={2}
-          />
+          {/* Exit — pulsing neon green */}
+          <g className="maze-exit-pulse" filter="url(#glow-exit)">
+            <rect
+              x={exit.col * cellSize + 3} y={exit.row * cellSize + 3}
+              width={cellSize - 6} height={cellSize - 6}
+              rx={5} fill="#052e16" stroke="#4ade80" strokeWidth={2}
+            />
+            <line x1={exit.col * cellSize + 7}          y1={exit.row * cellSize + cellSize / 2}
+                  x2={exit.col * cellSize + cellSize - 7} y2={exit.row * cellSize + cellSize / 2}
+                  stroke="#4ade80" strokeWidth={1.5} />
+            <line x1={exit.col * cellSize + cellSize / 2} y1={exit.row * cellSize + 7}
+                  x2={exit.col * cellSize + cellSize / 2} y2={exit.row * cellSize + cellSize - 7}
+                  stroke="#4ade80" strokeWidth={1.5} />
+          </g>
 
+          {/* Checkpoint */}
           {checkpoint && (
             <rect
-              x={checkpoint.col * cellSize + 6}
-              y={checkpoint.row * cellSize + 6}
-              width={cellSize - 12}
-              height={cellSize - 12}
-              rx={6}
-              fill="#ddd6fe"
-              stroke="#7c3aed"
-              strokeWidth={2}
+              x={checkpoint.col * cellSize + 5} y={checkpoint.row * cellSize + 5}
+              width={cellSize - 10} height={cellSize - 10}
+              rx={4} fill="#1e1b4b" stroke="#a78bfa" strokeWidth={2}
+              filter="url(#glow-ckpt)"
             />
           )}
 
+          {/* Bonuses — gold stars */}
           {bonuses.map((bonus) => {
-            const center = cellCenter(cellSize, bonus);
+            const { x: cx, y: cy } = cellCenter(cellSize, bonus);
             return (
-              <circle
+              <path
                 key={keyOf(bonus)}
-                cx={center.x}
-                cy={center.y}
-                r={5}
-                fill="#f59e0b"
-                stroke="#b45309"
-                strokeWidth={1.5}
+                d={starPath(cx, cy, 8, 3.5)}
+                fill="#fbbf24" stroke="#f59e0b" strokeWidth={0.5}
+                filter="url(#glow-bonus)"
               />
             );
           })}
 
+          {/* Player — aura ring + glowing core */}
+          <circle
+            cx={cellCenter(cellSize, player).x}
+            cy={cellCenter(cellSize, player).y}
+            r={cellSize / 3 + 5}
+            fill={wallFlash ? '#f43f5e' : '#3b82f6'}
+            className="maze-aura-pulse"
+          />
           <circle
             cx={cellCenter(cellSize, player).x}
             cy={cellCenter(cellSize, player).y}
             r={cellSize / 3}
-            fill={wallFlash ? '#fb7185' : '#2563eb'}
+            fill={wallFlash ? '#f43f5e' : '#60a5fa'}
+            filter="url(#glow-player)"
           />
         </svg>
 
-        <div className="mt-3 text-center text-sm text-emerald-700 font-medium">
+        <div className="mt-3 text-center text-sm text-cyan-400/80 font-medium">
           {started && !finished
             ? 'Controlează bila cu săgeți, swipe sau drag între celule vecine.'
             : 'Așteaptă startul meciului pentru a începe.'}
@@ -465,7 +545,7 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
         <button
           onClick={() => move('up')}
           disabled={!started || finished}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-40"
+          className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
         >
           ↑
         </button>
@@ -473,17 +553,17 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
         <button
           onClick={() => move('left')}
           disabled={!started || finished}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-40"
+          className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
         >
           ←
         </button>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-400 text-center">
+        <div className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-500 text-center">
           ●
         </div>
         <button
           onClick={() => move('right')}
           disabled={!started || finished}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-40"
+          className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
         >
           →
         </button>
@@ -491,7 +571,7 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
         <button
           onClick={() => move('down')}
           disabled={!started || finished}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-40"
+          className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
         >
           ↓
         </button>

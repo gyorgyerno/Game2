@@ -1,9 +1,22 @@
 import { Router, Response } from 'express';
 import OpenAI from 'openai';
+import rateLimit from 'express-rate-limit';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import logger from '../logger';
 
 const router = Router();
+
+// Rate limit: max 10 puzzle-uri generate/minut per useraccount (keyed by userId din JWT)
+const aiGenerateRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => (req as AuthRequest).userId ?? req.ip ?? 'unknown',
+  handler: (_req, res) => {
+    res.status(429).json({ error: 'Prea multe cereri de generare. Încearcă din nou în un minut.' });
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // ─── In-memory puzzle cache (matchId → puzzle) ────────────────────────────────
 export interface CrosswordWord {
@@ -167,12 +180,101 @@ const LEVEL_CONFIG: Record<number, { minWords: number; maxWords: number; hMinLen
   5: { minWords: 12, maxWords: 16, hMinLen: 5, hMaxLen: 9, difficulty: 'foarte dificil, cuvinte specializate sau compuse' },
 };
 
-// ─── OpenAI generation ────────────────────────────────────────────────────────
+function getLevelConfig(level: number): typeof LEVEL_CONFIG[number] {
+  return LEVEL_CONFIG[level] ?? LEVEL_CONFIG[5];
+}
+
+// ─── Validator ────────────────────────────────────────────────────────────────
+// Returnează lista de erori. Array gol = puzzle valid.
+function validatePuzzleRaw(parsed: {
+  mainWord: string;
+  mainWordClue: string;
+  title: string;
+  horizontalWords: Array<{ word: string; clue: string; crossIndex: number }>;
+}, cfg: typeof LEVEL_CONFIG[number]): string[] {
+  const errors: string[] = [];
+
+  // 1. mainWord trebuie să existe
+  if (!parsed.mainWord || typeof parsed.mainWord !== 'string') {
+    errors.push('mainWord lipsește');
+    return errors; // fatal, nu continuăm
+  }
+
+  const mainWord = parsed.mainWord.toUpperCase().trim();
+
+  // 2. mainWord — numai litere fără diacritice
+  if (!/^[A-Z]+$/.test(mainWord)) {
+    errors.push(`mainWord "${mainWord}" conține caractere invalide — folosește doar A-Z fără diacritice`);
+  }
+
+  // 3. mainWord lungime
+  if (mainWord.length < cfg.minWords || mainWord.length > cfg.maxWords) {
+    errors.push(`mainWord "${mainWord}" are ${mainWord.length} litere, dar trebuie ${cfg.minWords}–${cfg.maxWords}`);
+  }
+
+  // 4. horizontalWords trebuie să existe și să aibă exact mainWord.length cuvinte
+  if (!Array.isArray(parsed.horizontalWords)) {
+    errors.push('horizontalWords lipsește');
+    return errors;
+  }
+  if (parsed.horizontalWords.length !== mainWord.length) {
+    errors.push(`Număr greșit de cuvinte orizontale: ${parsed.horizontalWords.length}, trebuie exact ${mainWord.length} (unul per literă din mainWord)`);
+  }
+
+  const seenWords = new Set<string>();
+
+  for (let i = 0; i < parsed.horizontalWords.length; i++) {
+    const hw = parsed.horizontalWords[i];
+    if (!hw || typeof hw.word !== 'string') {
+      errors.push(`horizontalWords[${i}] lipsește sau are format greșit`);
+      continue;
+    }
+
+    const word = hw.word.toUpperCase().trim();
+    const expectedLetter = mainWord[i];
+
+    // 5. Fără diacritice
+    if (!/^[A-Z]+$/.test(word)) {
+      errors.push(`cuvântul orizontal "${word}" (poziția ${i}) conține diacritice sau caractere invalide`);
+    }
+
+    // 6. Lungime cuvânt orizontal
+    if (word.length < cfg.hMinLen || word.length > cfg.hMaxLen) {
+      errors.push(`"${word}" (poziția ${i}) are ${word.length} litere, dar trebuie ${cfg.hMinLen}–${cfg.hMaxLen}`);
+    }
+
+    // 7. crossIndex bounds
+    if (typeof hw.crossIndex !== 'number' || !Number.isInteger(hw.crossIndex) ||
+        hw.crossIndex < 0 || hw.crossIndex >= word.length) {
+      errors.push(`"${word}" (poziția ${i}): crossIndex=${hw.crossIndex} este în afara lungimii cuvântului (0–${word.length - 1})`);
+    } else {
+      // 8. Intersecție corectă
+      if (word[hw.crossIndex] !== expectedLetter) {
+        errors.push(`"${word}"[${hw.crossIndex}]="${word[hw.crossIndex]}" ≠ "${expectedLetter}" (litera ${i} din mainWord "${mainWord}")`);
+      }
+    }
+
+    // 9. Fără duplicate
+    if (seenWords.has(word)) {
+      errors.push(`cuvântul "${word}" apare de mai multe ori`);
+    }
+    seenWords.add(word);
+
+    // 10. Titlu și indicii trebuie să existe
+    if (!hw.clue || typeof hw.clue !== 'string' || hw.clue.trim().length < 3) {
+      errors.push(`indiciu lipsă sau prea scurt pentru "${word}" (poziția ${i})`);
+    }
+  }
+
+  return errors;
+}
+
+// ─── OpenAI generation cu retry ──────────────────────────────────────────────
 async function generateWithAI(level: number = 1, theme: string = 'general', elo: number = 1000): Promise<CrosswordPuzzle> {
   const apiKey = process.env['OPENAI_API_KEY'];
   if (!apiKey) throw new Error('No OPENAI_API_KEY');
 
-  const cfg = LEVEL_CONFIG[level] || LEVEL_CONFIG[1];
+  const cfg = getLevelConfig(level);
   const openai = new OpenAI({ apiKey });
   const themeDesc = AI_THEMES[theme] || AI_THEMES['general'];
   const eloHint = eloToDifficultyHint(elo);
@@ -181,8 +283,13 @@ async function generateWithAI(level: number = 1, theme: string = 'general', elo:
 Generează o integramă cu un cuvânt vertical principal și cuvinte orizontale care să se intersecteze cu el.
 Răspunde DOAR cu JSON valid, fără text suplimentar.`;
 
-  const userPrompt = `Generează o integramă românească de nivel ${level} cu tema: ${themeDesc}.
-${eloHint}
+  function buildUserPrompt(previousErrors?: string[]): string {
+    const errorSection = previousErrors && previousErrors.length > 0
+      ? `\n\n⚠️ ÎNCERCAREA ANTERIOARĂ A EȘUAT cu aceste erori — corectează-le:\n${previousErrors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')}\n`
+      : '';
+
+    return `Generează o integramă românească de nivel ${level} cu tema: ${themeDesc}.
+${eloHint}${errorSection}
 - Un cuvânt vertical principal de exact ${cfg.minWords}-${cfg.maxWords} litere
 - Câte un cuvânt orizontal pentru fiecare literă a cuvântului vertical (deci ${cfg.minWords}-${cfg.maxWords} cuvinte orizontale)
 - Fiecare cuvânt orizontal trebuie să conțină litera verticală la poziția indicată de "crossIndex" (0-based)
@@ -198,44 +305,57 @@ Returnează exact acest format JSON:
 }
 
 Reguli STRICTE:
-- Toate cuvintele în limba română, cu majuscule, FĂRĂ diacritice (A nu Ă, I nu Î, S nu Ș etc.)
+- Toate cuvintele în limba română, cu majuscule, FĂRĂ diacritice (A nu Ă, I nu Î, S nu Ș, T nu Ț etc.)
 - mainWord să aibă exact ${cfg.minWords}-${cfg.maxWords} litere
 - Cuvintele orizontale să aibă ${cfg.hMinLen}-${cfg.hMaxLen} litere
+- horizontalWords să aibă EXACT același număr de elemente ca literele din mainWord
 - crossIndex să fie corect: word[crossIndex] trebuie să fie EXACT litera corespunzătoare din mainWord
+- Fără cuvinte duplicate
 - Dificultate: ${cfg.difficulty}`;
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    response_format: { type: 'json_object' },
-    temperature: 0.9,
-    max_tokens: 1200,
-  });
+  }
 
-  const raw = response.choices[0]?.message?.content;
-  if (!raw) throw new Error('Empty AI response');
+  const MAX_RETRIES = 3;
+  let lastErrors: string[] = [];
 
-  const parsed = JSON.parse(raw);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let raw: string | null = null;
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: buildUserPrompt(attempt > 1 ? lastErrors : undefined) },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: attempt === 1 ? 0.9 : 0.7,
+        max_tokens: 1500,
+      });
 
-  // Validate intersections
-  const mainWord: string = parsed.mainWord.toUpperCase();
-  for (let i = 0; i < parsed.horizontalWords.length; i++) {
-    const hw = parsed.horizontalWords[i];
-    const word = hw.word.toUpperCase();
-    const expectedLetter = mainWord[i];
-    if (!expectedLetter) throw new Error(`Prea multe cuvinte orizontale pentru ${mainWord}`);
-    if (word[hw.crossIndex] !== expectedLetter) {
-      throw new Error(`Intersecție greșită: ${word}[${hw.crossIndex}] != ${expectedLetter}`);
+      raw = response.choices[0]?.message?.content ?? null;
+      if (!raw) throw new Error('Empty AI response');
+
+      const parsed = JSON.parse(raw);
+      lastErrors = validatePuzzleRaw(parsed, cfg);
+
+      if (lastErrors.length === 0) {
+        logger.info(`[AI] Puzzle valid la încercarea ${attempt}`, { level, theme });
+        return buildPuzzle({ ...parsed });
+      }
+
+      logger.warn(`[AI] Puzzle invalid la încercarea ${attempt}/${MAX_RETRIES}`, { errors: lastErrors, level });
+
+    } catch (parseOrApiErr: unknown) {
+      const msg = parseOrApiErr instanceof Error ? parseOrApiErr.message : String(parseOrApiErr);
+      lastErrors = [`Eroare la parsare JSON sau API: ${msg}`];
+      logger.warn(`[AI] Eroare la încercarea ${attempt}/${MAX_RETRIES}`, { error: msg });
     }
   }
 
-  return buildPuzzle({ ...parsed });
+  throw new Error(`Puzzle invalid după ${MAX_RETRIES} încercări. Ultimele erori: ${lastErrors.join('; ')}`);
 }
 
 // ─── POST /api/ai/generate-puzzle ────────────────────────────────────────────
-router.post('/generate-puzzle', requireAuth, async (req: AuthRequest & import('express').Request, res: Response) => {
+router.post('/generate-puzzle', requireAuth, aiGenerateRateLimit, async (req: AuthRequest & import('express').Request, res: Response) => {
   const { matchId, level = 1, theme = 'general', elo = 1000 } = (req as import('express').Request).body as {
     matchId?: string; level?: number; theme?: string; elo?: number;
   };
@@ -245,7 +365,7 @@ router.post('/generate-puzzle', requireAuth, async (req: AuthRequest & import('e
     return res.json(puzzleCache.get(matchId));
   }
 
-  const cfg = LEVEL_CONFIG[level] || LEVEL_CONFIG[1];
+  const cfg = getLevelConfig(level);
 
   try {
     let puzzle: CrosswordPuzzle;

@@ -81,6 +81,11 @@ flowchart LR
 - Migrations: `backend/prisma/migrations/`
 - Seed: `backend/prisma/seed.ts`
 
+### 3.6 Solo Progress Persistence
+- Integrame solo folosește modelul dedicat `UserSoloGameProgress`
+- Labirinturi solo folosește `UserGameStats` cu game type dedicat
+- frontend-ul hidratează progresul solo din backend și păstrează fallback local în store-urile din `frontend-web/src/store/`
+
 ## 4) Frontend Web Architecture
 ### 4.1 Framework
 - Next.js App Router în `frontend-web/src/app/`
@@ -103,6 +108,10 @@ flowchart LR
 - API clients: `frontend-web/src/lib/api.ts`, `frontend-web/src/lib/adminApi.ts`
 - Socket client: `frontend-web/src/lib/socket.ts`
 - Stores: `frontend-web/src/store/`
+
+#### Stores importante pentru solo
+- `gameProgress.ts` – progres Integrame solo, local + sync backend
+- `mazeSoloProgress.ts` – progres Labirinturi solo, local + sync backend
 
 ## 5) Mobile App Architecture
 - Entry/layout: `mobile-app/app/_layout.tsx`
@@ -137,6 +146,12 @@ flowchart LR
 - Backend admin routes în `backend/src/routes/admin.ts`
 - Frontend admin pages în `frontend-web/src/app/admin/`
 - Funcție: control operațional (jocuri, invites, logs, configurări viitoare).
+
+### Admin Settings
+- pagina `/admin/settings` gestionează acum:
+  - scoring per joc și per nivel
+  - parametri globali ELO / XP / ligi
+  - manager nivele (`displayName`, `difficultyValue`, `isActive`, `maxPlayers`, `winsToUnlock`, `gamesPerLevel`)
 
 ## 9) Configuration & Deployment
 - Root PM2 config: `ecosystem.config.js`
@@ -177,5 +192,5 @@ La orice schimbare arhitecturală:
 - notează impactul pe fluxurile runtime
 
 ---
-Last updated: 2026-03-05
+Last updated: 2026-03-27
 Owner: Core Platform Team

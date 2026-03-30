@@ -5,6 +5,12 @@ export interface FrontendGameDefinition {
   aliases?: string[];
   uiVariant: 'integrame' | 'maze';
   supportsSolo?: boolean;
+  /** Scurtă descriere a regulilor, afișată în lobby */
+  howToPlay?: string;
+  /** Hint comenzi input afișat în lobby */
+  controlsHint?: string;
+  /** Culoare accent pentru lobby (clasa Tailwind fără prefix) */
+  accentColor?: 'violet' | 'emerald' | 'sky' | 'orange';
 }
 
 export interface ServerGameDefinition {
@@ -25,9 +31,37 @@ export interface ServerGameDefinition {
  * 3) Adaugă reguli în @integrame/shared + backend GameRegistry
  */
 export const GAME_DEFINITIONS: FrontendGameDefinition[] = [
-  { id: 'integrame', label: 'Integrame', emoji: '📝', uiVariant: 'integrame', supportsSolo: true },
-  { id: 'labirinturi', label: 'Labirinturi', emoji: '🌀', aliases: ['maze'], uiVariant: 'maze', supportsSolo: true },
-  { id: 'slogane', label: 'Slogane', emoji: '💬', uiVariant: 'integrame', supportsSolo: false },
+  {
+    id: 'integrame',
+    label: 'Integrame',
+    emoji: '📝',
+    uiVariant: 'integrame',
+    supportsSolo: true,
+    accentColor: 'violet',
+    howToPlay: 'Ghicește cuvintele orizontale pentru a descoperi cuvântul vertical ascuns.',
+    controlsHint: 'Click pe un cuvânt → tastează literele',
+  },
+  {
+    id: 'labirinturi',
+    label: 'Labirinturi',
+    emoji: '🌀',
+    aliases: ['maze'],
+    uiVariant: 'maze',
+    supportsSolo: true,
+    accentColor: 'emerald',
+    howToPlay: 'Navighează bila prin labirint de la intrare la ieșire. Colectează bonusuri pe drum.',
+    controlsHint: 'Săgeți / WASD · Swipe · Click & Drag',
+  },
+  {
+    id: 'slogane',
+    label: 'Slogane',
+    emoji: '💬',
+    uiVariant: 'integrame',
+    supportsSolo: false,
+    accentColor: 'sky',
+    howToPlay: 'Ghicește sloganul brandului din indicii.',
+    controlsHint: 'Click pe literă sau tastează',
+  },
 ];
 
 export function getSelectableGames(): FrontendGameDefinition[] {

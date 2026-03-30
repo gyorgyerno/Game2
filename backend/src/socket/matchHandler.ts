@@ -8,6 +8,7 @@ import { gameRegistry } from '../games/GameRegistry';
 import { systemConfigService } from '../services/SystemConfigService';
 import { config } from '../config';
 import { startBotGameplaySimulation } from '../services/simulatedPlayers/BotGameplaySimulator';
+import { evaluateChallengesForUser } from '../services/BonusChallengeService';
 
 const countdownTimers: Record<string, ReturnType<typeof setInterval>> = {};
 const matchTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -45,6 +46,16 @@ function clampInteger(value: number, min: number, max: number): number {
 
 function isMazeGame(gameType: string): boolean {
   return gameType === 'maze' || gameType === 'labirinturi';
+}
+
+/** Hash deterministă din matchId → seed uint32.
+ *  Același matchId produce mereu același seed → ambii jucători generează același labirint. */
+function mazeSeedFromMatchId(matchId: string): number {
+  let h = 0x12345678;
+  for (let i = 0; i < matchId.length; i++) {
+    h = (Math.imul(h, 31) + matchId.charCodeAt(i)) >>> 0;
+  }
+  return h >>> 0;
 }
 
 function sanitizeMetrics(metrics: Record<string, unknown>): Record<string, unknown> {
@@ -292,7 +303,8 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
 
       if (match.status === 'active') {
         logger.info(`[JOIN_MATCH] ACTIV → trimit MATCH_START direct user=${userId}`);
-        socket.emit(SOCKET_EVENTS.MATCH_START, { startedAt: match.startedAt });
+        const seed = isMazeGame(match.gameType) ? mazeSeedFromMatchId(match.id) : undefined;
+        socket.emit(SOCKET_EVENTS.MATCH_START, { startedAt: match.startedAt, mazeSeed: seed, timeLimit: gameRegistry.getEffectiveRules(match.gameType, match.level)?.timeLimit ?? 0 });
         return;
       }
 
@@ -334,15 +346,19 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           clearInterval(countdownTimers[matchId]);
           delete countdownTimers[matchId];
           await prisma.match.update({ where: { id: matchId }, data: { status: 'active', startedAt: new Date() } });
-          io.to(room).emit(SOCKET_EVENTS.MATCH_START, { startedAt: new Date() });
-          logger.info(`[COUNTDOWN] MATCH_START emis room=${room}`);
+          const mazeSeed = isMazeGame(match.gameType) ? mazeSeedFromMatchId(matchId) : undefined;
           const rules = gameRegistry.getEffectiveRules(match.gameType, match.level);
           if (!rules) {
             logger.error('[COUNTDOWN] game rules missing for match', { matchId, gameType: match.gameType });
             io.to(room).emit(SOCKET_EVENTS.ERROR, { message: 'Game rules not found' });
             return;
           }
-          matchTimers[matchId] = setTimeout(() => autoFinishMatch(io, matchId, room), rules.timeLimit * 1000);
+          io.to(room).emit(SOCKET_EVENTS.MATCH_START, { startedAt: new Date(), mazeSeed, timeLimit: rules.timeLimit });
+          logger.info(`[COUNTDOWN] MATCH_START emis room=${room}${mazeSeed !== undefined ? ` mazeSeed=${mazeSeed}` : ''}`);
+          // Dacă timeLimit === 0, meciul nu are timer — nu se auto-finalizează
+          if (rules.timeLimit > 0) {
+            matchTimers[matchId] = setTimeout(() => autoFinishMatch(io, matchId, room), rules.timeLimit * 1000);
+          }
           // Pornește simularea gameplay pentru boti (SIMULATED/GHOST)
           startBotGameplaySimulation({
             io,
@@ -350,7 +366,8 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
             room,
             gameType: match.gameType,
             level: match.level,
-            timeLimit: rules.timeLimit,
+            // Dacă timeLimit === 0 (nelimitat), botii folosesc 300s ca referință internă
+            timeLimit: rules.timeLimit > 0 ? rules.timeLimit : 300,
           }).catch((err) => logger.error('[BOT_SIM] failed to start', { matchId, err }));
         }
       }, 1000);
@@ -842,6 +859,15 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string, fo
           mistakes: mp.mistakes ?? 0,
           completionTimeSec,
         });
+
+        // Evaluează challengele de bonus pentru jucătorul curent
+        await evaluateChallengesForUser({
+          userId: mp.userId,
+          gameType: match.gameType,
+          position,
+          totalPlayers,
+          score: mp.score,
+        }).catch((err) => logger.warn('evaluateChallengesForUser failed', { err }));
       }
     }
 

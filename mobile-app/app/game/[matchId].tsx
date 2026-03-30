@@ -67,10 +67,11 @@ export default function GamePlayScreen() {
 
       socket.on(SOCKET_EVENTS.MATCH_STATE, (m: Match) => setMatch(m));
       socket.on(SOCKET_EVENTS.MATCH_COUNTDOWN, ({ countdown: c }: { countdown: number }) => setCountdown(c));
-      socket.on(SOCKET_EVENTS.MATCH_START, () => {
+      socket.on(SOCKET_EVENTS.MATCH_START, ({ mazeSeed: _seed }: { startedAt?: string; mazeSeed?: number }) => {
         setCountdown(null);
         setStarted(true);
         setTimeLeft(rules.timeLimit);
+        // mazeSeed rezervat pentru viitoarea implementare de labirint pe mobile
       });
       socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { players: MatchPlayer[] }) => {
         setMatch((prev) => prev ? { ...prev, players: data.players } : prev);

@@ -14,6 +14,7 @@ import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/Simulat
 import { activityFeedGenerator } from '../services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from '../services/simulatedPlayers/BotChatGenerator';
 import { runtimeMetricsMonitor } from '../services/simulatedPlayers/RuntimeMetricsMonitor';
+import { CHALLENGE_TYPE_DEFS, challengeDescription, ChallengeType } from '../services/BonusChallengeService';
 
 const router = Router();
 
@@ -1406,8 +1407,8 @@ router.patch('/scoring-configs/:gameType', adminAuth, asyncHandler(async (req: A
       return;
     }
   }
-  if (timeLimitSeconds !== undefined && timeLimitSeconds < 10) {
-    res.status(400).json({ error: 'timeLimitSeconds minim 10 secunde' });
+  if (timeLimitSeconds !== undefined && timeLimitSeconds !== 0 && timeLimitSeconds < 10) {
+    res.status(400).json({ error: 'timeLimitSeconds minim 10 secunde (sau 0 = fără limită)' });
     return;
   }
 
@@ -1639,6 +1640,242 @@ router.delete('/system-config/:key', adminAuth, asyncHandler(async (req: AdminRe
 
   logger.info(`[ADMIN] SystemConfig ${key} reset la default`, { admin: req.adminUsername });
   res.json({ ok: true, reset: key });
+}));
+
+// ─── Level Config endpoints ───────────────────────────────────────────────────
+import { gameLevelConfigService } from '../services/GameLevelConfigService';
+
+// GET /api/admin/level-configs/:gameType — toate nivelele unui joc
+router.get('/level-configs/:gameType', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { gameType } = req.params as { gameType: string };
+  const levels = gameLevelConfigService.getAllLevels(gameType);
+
+  // Numărul de meciuri finalizate per nivel
+  const counts = await prisma.match.groupBy({
+    by: ['level'],
+    where: {
+      gameType: { in: [gameType, gameType === 'labirinturi' ? 'maze' : gameType] },
+      status: 'finished',
+    },
+    _count: { id: true },
+  });
+  const matchCountMap: Record<number, number> = {};
+  for (const row of counts) {
+    matchCountMap[row.level] = (matchCountMap[row.level] ?? 0) + row._count.id;
+  }
+
+  const levelsWithCount = levels.map((l) => ({
+    ...l,
+    matchCount: matchCountMap[l.level] ?? 0,
+  }));
+
+  res.json({ gameType, levels: levelsWithCount });
+}));
+
+// PATCH /api/admin/level-configs/:gameType/:level — editează sau creează un nivel
+router.patch('/level-configs/:gameType/:level', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { gameType, level: levelStr } = req.params as { gameType: string; level: string };
+  const level = parseInt(levelStr, 10);
+  if (!Number.isFinite(level) || level < 1 || level > 999) {
+    res.status(400).json({ error: 'Nivel invalid (1–999)' });
+    return;
+  }
+
+  const { displayName, difficultyValue, isActive, maxPlayers, winsToUnlock, gamesPerLevel } = req.body as {
+    displayName?: string;
+    difficultyValue?: number;
+    isActive?: boolean;
+    maxPlayers?: number;
+    winsToUnlock?: number;
+    gamesPerLevel?: number;
+  };
+
+  if (difficultyValue !== undefined && (difficultyValue < 0 || difficultyValue > 100)) {
+    res.status(400).json({ error: 'difficultyValue trebuie să fie între 0 și 100' });
+    return;
+  }
+  if (maxPlayers !== undefined && (maxPlayers < 1 || maxPlayers > 500)) {
+    res.status(400).json({ error: 'maxPlayers trebuie să fie între 1 și 500' });
+    return;
+  }
+  if (winsToUnlock !== undefined && (!Number.isFinite(winsToUnlock) || winsToUnlock < 1 || winsToUnlock > 500)) {
+    res.status(400).json({ error: 'winsToUnlock trebuie să fie între 1 și 500' });
+    return;
+  }
+  if (gamesPerLevel !== undefined && (!Number.isFinite(gamesPerLevel) || gamesPerLevel < 1 || gamesPerLevel > 50)) {
+    res.status(400).json({ error: 'gamesPerLevel trebuie să fie între 1 și 50' });
+    return;
+  }
+
+  const data: Record<string, unknown> = {};
+  if (displayName   !== undefined) data['displayName']   = String(displayName).slice(0, 100);
+  if (difficultyValue !== undefined) data['difficultyValue'] = Math.round(difficultyValue);
+  if (isActive      !== undefined) data['isActive']      = Boolean(isActive);
+  if (maxPlayers    !== undefined) data['maxPlayers']    = Math.round(maxPlayers);
+  if (winsToUnlock  !== undefined) data['winsToUnlock']  = Math.round(winsToUnlock);
+  if (gamesPerLevel !== undefined) data['gamesPerLevel'] = Math.round(gamesPerLevel);
+
+  const updated = await gameLevelConfigService.upsertLevel(
+    prisma, gameType, level,
+    data as Parameters<typeof gameLevelConfigService.upsertLevel>[3],
+    req.adminUsername,
+  );
+
+  logger.info(`[ADMIN] LevelConfig upsert gameType=${gameType} level=${level}`, { admin: req.adminUsername, data });
+  res.json({ ok: true, level: updated });
+}));
+
+// DELETE /api/admin/level-configs/:gameType/:level — șterge un nivel
+router.delete('/level-configs/:gameType/:level', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { gameType, level: levelStr } = req.params as { gameType: string; level: string };
+  const level = parseInt(levelStr, 10);
+  if (!Number.isFinite(level) || level < 1) {
+    res.status(400).json({ error: 'Nivel invalid' });
+    return;
+  }
+
+  const deleted = await gameLevelConfigService.deleteLevel(prisma, gameType, level);
+  if (!deleted) {
+    res.status(404).json({ error: 'Nivelul nu există' });
+    return;
+  }
+
+  logger.info(`[ADMIN] LevelConfig deleted gameType=${gameType} level=${level}`, { admin: req.adminUsername });
+  res.json({ ok: true });
+}));
+
+// ─── Bonus Challenges ─────────────────────────────────────────────────────────
+
+// GET /api/admin/bonus-challenges?gameType=integrame
+// Returnează challengele active + tipurile disponibile
+router.get('/bonus-challenges', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  void reqA;
+  const { gameType } = req.query as { gameType?: string };
+
+  const where = gameType
+    ? { gameType: { in: [gameType, '*'] } }
+    : {};
+
+  const challenges = await prisma.bonusChallenge.findMany({
+    where,
+    orderBy: [{ gameType: 'asc' }, { createdAt: 'asc' }],
+    include: { _count: { select: { awards: true } } },
+  });
+
+  const enriched = challenges.map((ch) => ({
+    ...ch,
+    description: challengeDescription(ch.challengeType as ChallengeType, ch.requiredValue, ch.bonusPoints),
+    icon: CHALLENGE_TYPE_DEFS[ch.challengeType as ChallengeType]?.icon ?? '🎯',
+    awardsCount: ch._count.awards,
+  }));
+
+  res.json({
+    challenges: enriched,
+    challengeTypes: Object.values(CHALLENGE_TYPE_DEFS).map((d) => ({
+      type: d.type,
+      label: d.label,
+      icon: d.icon,
+    })),
+  });
+}));
+
+// POST /api/admin/bonus-challenges
+// Creează un challenge nou
+router.post('/bonus-challenges', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  const { gameType, challengeType, label, requiredValue, bonusPoints } = req.body as {
+    gameType: string;
+    challengeType: string;
+    label: string;
+    requiredValue: number;
+    bonusPoints: number;
+  };
+
+  if (!gameType || !challengeType || !label) {
+    res.status(400).json({ error: 'gameType, challengeType și label sunt obligatorii' });
+    return;
+  }
+  if (!CHALLENGE_TYPE_DEFS[challengeType as ChallengeType]) {
+    res.status(400).json({ error: `Tip de challenge necunoscut: ${challengeType}` });
+    return;
+  }
+  const n = Number(requiredValue);
+  const pts = Number(bonusPoints);
+  if (!Number.isFinite(n) || n < 1) {
+    res.status(400).json({ error: 'requiredValue trebuie să fie minim 1' });
+    return;
+  }
+  if (!Number.isFinite(pts) || pts < 1) {
+    res.status(400).json({ error: 'bonusPoints trebuie să fie minim 1' });
+    return;
+  }
+
+  const ch = await prisma.bonusChallenge.create({
+    data: {
+      gameType,
+      challengeType,
+      label: label.trim(),
+      requiredValue: n,
+      bonusPoints: pts,
+      isActive: true,
+      createdBy: reqA.adminUsername,
+    },
+  });
+
+  logger.info('[ADMIN] BonusChallenge created', { id: ch.id, gameType, challengeType, admin: reqA.adminUsername });
+  res.status(201).json({
+    ...ch,
+    description: challengeDescription(ch.challengeType as ChallengeType, ch.requiredValue, ch.bonusPoints),
+    icon: CHALLENGE_TYPE_DEFS[ch.challengeType as ChallengeType]?.icon ?? '🎯',
+    awardsCount: 0,
+  });
+}));
+
+// PATCH /api/admin/bonus-challenges/:id
+// Editează label, requiredValue, bonusPoints sau toggle isActive
+router.patch('/bonus-challenges/:id', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  const { id } = req.params;
+  const { label, requiredValue, bonusPoints, isActive } = req.body as Partial<{
+    label: string;
+    requiredValue: number;
+    bonusPoints: number;
+    isActive: boolean;
+  }>;
+
+  const data: Record<string, unknown> = {};
+  if (label       !== undefined) data.label = label.trim();
+  if (isActive    !== undefined) data.isActive = Boolean(isActive);
+  if (requiredValue !== undefined) {
+    const n = Number(requiredValue);
+    if (!Number.isFinite(n) || n < 1) { res.status(400).json({ error: 'requiredValue invalid' }); return; }
+    data.requiredValue = n;
+  }
+  if (bonusPoints !== undefined) {
+    const pts = Number(bonusPoints);
+    if (!Number.isFinite(pts) || pts < 1) { res.status(400).json({ error: 'bonusPoints invalid' }); return; }
+    data.bonusPoints = pts;
+  }
+
+  const ch = await prisma.bonusChallenge.update({ where: { id }, data });
+  logger.info('[ADMIN] BonusChallenge updated', { id, admin: reqA.adminUsername });
+  res.json({
+    ...ch,
+    description: challengeDescription(ch.challengeType as ChallengeType, ch.requiredValue, ch.bonusPoints),
+    icon: CHALLENGE_TYPE_DEFS[ch.challengeType as ChallengeType]?.icon ?? '🎯',
+  });
+}));
+
+// DELETE /api/admin/bonus-challenges/:id
+// Șterge un challenge (și toate award-urile aferente prin onDelete: Cascade)
+router.delete('/bonus-challenges/:id', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  const { id } = req.params;
+
+  await prisma.bonusChallenge.delete({ where: { id } });
+  logger.info('[ADMIN] BonusChallenge deleted', { id, admin: reqA.adminUsername });
+  res.json({ ok: true });
 }));
 
 export default router;

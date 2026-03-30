@@ -4,22 +4,30 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Trophy, Play, ChevronDown, BookOpen, Star, Link2, Copy, Check, X, Lock } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
-import { matchesApi, invitesApi, statsApi } from '@/lib/api';
-import { Match, GameLevel, MAX_PLAYERS_PER_LEVEL, UserGameStats } from '@integrame/shared';
+import { matchesApi, invitesApi, statsApi, api } from '@/lib/api';
+import { Match, UserGameStats } from '@integrame/shared';
 import Navbar from '@/components/Navbar';
-import { isCompleted } from '@/store/gameProgress';
+import { hydrateIntegrameProgressFromServer, isCompleted, isUnlocked } from '@/store/gameProgress';
 import { useGamesCatalog } from '@/games/useGamesCatalog';
 import { hydrateMazeProgressFromServer } from '@/store/mazeSoloProgress';
 
 const INVITE_TTL_SECONDS = 300;
 const RANDOM_ACCEPT_TTL_SECONDS = 10;
 
+type PublicLevelConfig = {
+  level: number;
+  displayName: string;
+  winsToUnlock: number;
+  gamesPerLevel: number;
+  maxPlayers: number;
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const games = useGamesCatalog();
   const { user, fetchMe, token, _hasHydrated } = useAuthStore();
   const [selectedGame, setSelectedGame] = useState('integrame');
-  const [selectedLevel, setSelectedLevel] = useState<GameLevel>(1);
+  const [selectedLevel, setSelectedLevel] = useState(1);
   const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(false);
   const [playError, setPlayError] = useState('');
@@ -41,6 +49,11 @@ export default function DashboardPage() {
   const [randomDecisionLoading, setRandomDecisionLoading] = useState(false);
   const [selectedSoloGame, setSelectedSoloGame] = useState('integrame');
   const [mazeCompleted, setMazeCompleted] = useState<Set<string>>(new Set());
+  const [selectedGameLevels, setSelectedGameLevels] = useState<PublicLevelConfig[]>([]);
+  const [mazeSoloLevels, setMazeSoloLevels] = useState<PublicLevelConfig[]>([]);
+  const [levelUnlockConfig, setLevelUnlockConfig] = useState<Record<number, number>>({});
+  const [integrameSoloLevels, setIntegrameSoloLevels] = useState<PublicLevelConfig[]>([]); 
+  const [soloDashMounted, setSoloDashMounted] = useState(false);
 
   const AI_THEME_LABELS: Record<string, string> = {
     general: '🎲 General',
@@ -61,6 +74,39 @@ export default function DashboardPage() {
     matchesApi.getHistory().then((r) => setRecentMatches(r.data)).catch(() => {});
     statsApi.getMyStats().then((r) => setStats(r.data)).catch(() => {});
   }, [_hasHydrated, token]);
+
+  useEffect(() => {
+    api.get<PublicLevelConfig[]>(`/games/levels/${selectedGame}`)
+      .then((r) => {
+        const map: Record<number, number> = {};
+        for (const item of r.data) map[item.level] = item.winsToUnlock;
+        setLevelUnlockConfig(map);
+        setSelectedGameLevels([...r.data].sort((a, b) => a.level - b.level));
+      })
+      .catch(() => {});
+  }, [selectedGame]);
+
+  useEffect(() => {
+    hydrateIntegrameProgressFromServer()
+      .catch(() => {})
+      .finally(() => setSoloDashMounted(true));
+  }, []);
+
+  useEffect(() => {
+    api.get<PublicLevelConfig[]>('/games/levels/integrame')
+      .then((r) => {
+        setIntegrameSoloLevels([...r.data].sort((a, b) => a.level - b.level));
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.get<PublicLevelConfig[]>('/games/levels/labirinturi')
+      .then((r) => {
+        setMazeSoloLevels([...r.data].sort((a, b) => a.level - b.level));
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (games.length === 0) return;
@@ -284,8 +330,11 @@ export default function DashboardPage() {
 
   if (!user) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#210340' }}><div className="w-8 h-8 border-2 border-violet-300 border-t-transparent rounded-full animate-spin" /></div>;
 
-  // Level unlock logic: each level requires 5 wins at the previous level
-  const WINS_TO_UNLOCK = 5;
+  // Level unlock logic: each level requires winsToUnlock wins at the previous level (configured in admin)
+  const winsNeeded = (lvl: number) => levelUnlockConfig[lvl] ?? 5;
+  const availableLevels = selectedGameLevels.length > 0 ? selectedGameLevels.map((cfg) => cfg.level) : [1, 2, 3, 4, 5];
+  const firstAvailableLevel = availableLevels[0] ?? 1;
+  const maxPlayersForLevel = (lvl: number) => selectedGameLevels.find((cfg) => cfg.level === lvl)?.maxPlayers ?? 2;
   // 'labirinturi' și 'maze' sunt același joc — stats pot fi salvate sub oricare
   const matchesGame = (statGameType: string) =>
     statGameType === selectedGame ||
@@ -293,15 +342,19 @@ export default function DashboardPage() {
     (selectedGame === 'maze' && statGameType === 'labirinturi');
   const levelWins = (lvl: number) =>
     stats.find((s) => matchesGame(s.gameType) && s.level === lvl)?.wins ?? 0;
-  const unlockedLevels = new Set<number>([1]);
-  for (let lvl = 2; lvl <= 5; lvl++) {
-    if (unlockedLevels.has(lvl - 1) && levelWins(lvl - 1) >= WINS_TO_UNLOCK) {
+  const unlockedLevels = new Set<number>([firstAvailableLevel]);
+  for (let index = 1; index < availableLevels.length; index += 1) {
+    const lvl = availableLevels[index]!;
+    const prevLevel = availableLevels[index - 1]!;
+    if (unlockedLevels.has(prevLevel) && levelWins(prevLevel) >= winsNeeded(lvl)) {
       unlockedLevels.add(lvl);
-    } else break;
+    } else {
+      break;
+    }
   }
-  const effectiveLevel: GameLevel = unlockedLevels.has(selectedLevel) ? selectedLevel : 1;
+  const effectiveLevel = unlockedLevels.has(selectedLevel) ? selectedLevel : firstAvailableLevel;
   // Next level that is locked (to show requirement hint)
-  const nextLockedLevel = ([2, 3, 4, 5] as GameLevel[]).find((lvl) => !unlockedLevels.has(lvl));
+  const nextLockedLevel = availableLevels.slice(1).find((lvl) => !unlockedLevels.has(lvl));
   const glassCard = 'rounded-[36px] border border-white/25 bg-white/12 backdrop-blur-xl shadow-[0_20px_60px_rgba(46,16,101,0.45)]';
   const levelCard = 'rounded-[22px] border border-white bg-white hover:bg-white transition-all hover:scale-[1.02] min-h-[140px] md:min-h-[160px] flex flex-col items-center justify-center shadow-lg shadow-violet-950/20';
   const lockedLevelCard = 'rounded-[22px] border border-white/40 bg-white/40 opacity-75 min-h-[120px] md:min-h-[130px] flex flex-col items-center justify-center';
@@ -351,16 +404,16 @@ export default function DashboardPage() {
                   <select
                     value={effectiveLevel}
                     onChange={(e) => {
-                      const lvl = parseInt(e.target.value) as GameLevel;
+                      const lvl = parseInt(e.target.value, 10);
                       if (unlockedLevels.has(lvl)) setSelectedLevel(lvl);
                     }}
                       className="input rounded-full appearance-none pr-8 text-[15px] bg-[#2a0a4a]/80 border-violet-300/30 focus:ring-violet-400"
                   >
-                    {([1, 2, 3, 4, 5] as GameLevel[]).map((l) => (
+                    {availableLevels.map((l) => (
                       <option key={l} value={l} disabled={!unlockedLevels.has(l)}>
                         {unlockedLevels.has(l)
-                          ? `Nivel ${l} – max ${MAX_PLAYERS_PER_LEVEL[l]} jucători`
-                          : `🔒 Nivel ${l} – ${levelWins(l - 1)}/${WINS_TO_UNLOCK} victorii N${l - 1}`}
+                          ? `Nivel ${l} – max ${maxPlayersForLevel(l)} jucători`
+                          : `🔒 Nivel ${l} – ${levelWins(l - 1)}/${winsNeeded(l)} victorii la N${l - 1}`}
                       </option>
                     ))}
                   </select>
@@ -369,8 +422,8 @@ export default function DashboardPage() {
                 {nextLockedLevel && (
                   <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
                     <Lock size={10} />
-                    Nivel {nextLockedLevel} se deblochează după {WINS_TO_UNLOCK} victorii la Nivel {nextLockedLevel - 1}
-                    <span className="text-violet-300 font-semibold">({levelWins(nextLockedLevel - 1)}/{WINS_TO_UNLOCK})</span>
+                    Nivel {nextLockedLevel} se deblochează după {winsNeeded(nextLockedLevel)} victorii la Nivel {nextLockedLevel - 1}
+                    <span className="text-violet-300 font-semibold">({levelWins(nextLockedLevel - 1)}/{winsNeeded(nextLockedLevel)})</span>
                   </p>
                 )}
               </div>
@@ -386,7 +439,7 @@ export default function DashboardPage() {
                     : <><Play size={16} fill="currentColor" /> Joacă normal</>}
                 </button>
                 <span className="text-[15px] text-slate-400 font-medium mt-2 text-center">
-                  🎯 Nivel {effectiveLevel} · max {MAX_PLAYERS_PER_LEVEL[effectiveLevel]} jucători
+                  🎯 Nivel {effectiveLevel} · max {maxPlayersForLevel(effectiveLevel)} jucători
                 </span>
               </div>
 
@@ -491,8 +544,16 @@ export default function DashboardPage() {
 
           {selectedSoloGame === 'integrame' ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-            {[1, 2, 3, 4, 5].map((lvl) => {
-              const unlocked = lvl === 1 || [0, 1, 2].every((gi) => isCompleted(lvl - 1, gi));
+            {(integrameSoloLevels.length > 0 ? integrameSoloLevels : [1,2,3,4,5].map((l) => ({ level: l, displayName: `Nivel ${l}`, winsToUnlock: 3, gamesPerLevel: 3, maxPlayers: 2 }))).map((cfg) => {
+              const lvl = cfg.level;
+              const gamesCount = cfg.gamesPerLevel ?? 3;
+              const prevCfg = integrameSoloLevels.find((c) => c.level === lvl - 1);
+              const prevGamesCount = prevCfg?.gamesPerLevel ?? 3;
+              const firstLevel = integrameSoloLevels[0]?.level ?? 1;
+              const unlocked = !soloDashMounted ? lvl === firstLevel : isUnlocked(lvl, 0, prevGamesCount);
+              const thisLevelCompleted = soloDashMounted
+                ? Array.from({ length: gamesCount }, (_, i) => i).filter((gi) => isCompleted(lvl, gi)).length
+                : 0;
 
               if (!unlocked) {
                 return (
@@ -501,7 +562,8 @@ export default function DashboardPage() {
                     className={`${lockedLevelCard} p-3 py-4 md:p-4 md:py-6 text-center`}
                   >
                     <div className="text-[28px] font-black text-[#15141a]">{lvl}</div>
-                    <div className="text-[15px] text-[#15141a] mt-1">Nivel {lvl}</div>
+                    <div className="text-[15px] text-[#15141a] mt-1">{cfg.displayName || `Nivel ${lvl}`}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">{gamesCount} jocuri</div>
                     <div className="mt-1.5 flex items-center gap-1 text-slate-600 text-[10px] font-semibold">
                       <Lock size={10} /> Blocat
                     </div>
@@ -526,16 +588,19 @@ export default function DashboardPage() {
                     {lvl}
                   </div>
                   <div className="text-[15px] text-[#15141a] mt-1">
-                    Nivel {lvl}
+                    {cfg.displayName || `Nivel ${lvl}`}
                   </div>
                   <div className="flex justify-center gap-1 mt-2">
-                    {[0, 1, 2].map((gi) => (
+                    {Array.from({ length: gamesCount }, (_, gi) => (
                       <Star
                         key={gi}
                         size={12}
                         className={isCompleted(lvl, gi) ? 'text-yellow-500 fill-yellow-500' : 'text-slate-400'}
                       />
                     ))}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    {thisLevelCompleted} / {gamesCount} jocuri
                   </div>
                   <Link
                     href="/integrame"
@@ -549,9 +614,16 @@ export default function DashboardPage() {
           </div>
           ) : selectedSoloGame === 'labirinturi' ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-              {[1, 2, 3, 4, 5].map((lvl) => {
-                const unlocked = lvl === 1 || [0, 1, 2, 3].every((gameIdx) => mazeCompleted.has(`${lvl - 1}-${gameIdx}`));
-                const levelDone = [0, 1, 2, 3].every((gameIdx) => mazeCompleted.has(`${lvl}-${gameIdx}`));
+              {(mazeSoloLevels.length > 0 ? mazeSoloLevels : [1, 2, 3, 4, 5].map((level) => ({ level, displayName: `Nivel ${level}`, winsToUnlock: 5, gamesPerLevel: 4, maxPlayers: 2 }))).map((cfg) => {
+                const lvl = cfg.level;
+                const configuredGamesCount = cfg.gamesPerLevel ?? 4;
+                const playableGamesCount = Math.min(configuredGamesCount, 4);
+                const firstMazeLevel = mazeSoloLevels[0]?.level ?? 1;
+                const prevCfg = mazeSoloLevels.find((entry) => entry.level === lvl - 1);
+                const prevPlayableGamesCount = Math.min(prevCfg?.gamesPerLevel ?? 4, 4);
+                const unlocked = lvl === firstMazeLevel || Array.from({ length: prevPlayableGamesCount }, (_v, gameIdx) => mazeCompleted.has(`${lvl - 1}-${gameIdx}`)).every(Boolean);
+                const levelDone = Array.from({ length: playableGamesCount }, (_v, gameIdx) => mazeCompleted.has(`${lvl}-${gameIdx}`)).every(Boolean);
+                const completedGamesCount = Array.from({ length: playableGamesCount }, (_v, gameIdx) => mazeCompleted.has(`${lvl}-${gameIdx}`)).filter(Boolean).length;
 
                 if (!unlocked) {
                   return (
@@ -560,7 +632,8 @@ export default function DashboardPage() {
                       className={`${lockedLevelCard} p-3 py-4 md:p-4 md:py-6 text-center`}
                     >
                       <div className="text-[28px] font-black text-[#15141a]">{lvl}</div>
-                      <div className="text-[15px] text-[#15141a] mt-1">Nivel {lvl}</div>
+                      <div className="text-[15px] text-[#15141a] mt-1">{cfg.displayName || `Nivel ${lvl}`}</div>
+                      <div className="text-[10px] text-slate-500 mt-1">{configuredGamesCount} jocuri</div>
                       <div className="text-[10px] mt-1.5 text-slate-600 font-semibold">🔒 Blocat</div>
                       <button
                         type="button"
@@ -583,10 +656,10 @@ export default function DashboardPage() {
                       {lvl}
                     </div>
                     <div className="text-[15px] text-[#15141a] mt-1">
-                      Nivel {lvl}
+                      {cfg.displayName || `Nivel ${lvl}`}
                     </div>
                     <div className="flex justify-center gap-1 mt-2">
-                      {[0, 1, 2, 3].map((gameIdx) => (
+                      {Array.from({ length: playableGamesCount }, (_v, gameIdx) => (
                         <Star
                           key={gameIdx}
                           size={12}
@@ -595,7 +668,7 @@ export default function DashboardPage() {
                       ))}
                     </div>
                     <div className={`text-[10px] mt-1.5 font-semibold ${levelDone ? 'text-emerald-600' : 'text-emerald-500'}`}>
-                      {levelDone ? '✅ Completat' : '🌀 Solo'}
+                      {completedGamesCount} / {configuredGamesCount} jocuri
                     </div>
                     <Link
                       href="/labirinturi"
