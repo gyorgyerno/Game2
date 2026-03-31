@@ -12,7 +12,7 @@ type MazeCell = {
 };
 
 type Position = { row: number; col: number };
-type MazeShapeVariant = 'rectangle' | 'circle' | 'triangle' | 'hexagon';
+type MazeShapeVariant = 'rectangle' | 'circle' | 'triangle' | 'hexagon' | 'diamond' | 'cross' | 'octagon' | 'ellipse' | 'arch' | 'arrow';
 
 interface MazePlayProps extends GamePlayProps {
   shapeVariant?: MazeShapeVariant;
@@ -56,9 +56,51 @@ function isCellInShape(row: number, col: number, size: number, shape: MazeShapeV
     return Math.abs(col - center) <= halfSpan;
   }
 
-  const q = Math.abs(x) / radius;
-  const r = Math.abs(y) / radius;
-  return q + r * 0.68 <= 1;
+  if (shape === 'hexagon') {
+    const q = Math.abs(x) / radius;
+    const r = Math.abs(y) / radius;
+    return q + r * 0.68 <= 1;
+  }
+
+  // Romb (pătrat rotit 45°)
+  if (shape === 'diamond') {
+    return Math.abs(x) + Math.abs(y) <= radius * 0.97;
+  }
+
+  // Cruce / Plus
+  if (shape === 'cross') {
+    return Math.abs(x) <= radius * 0.35 || Math.abs(y) <= radius * 0.35;
+  }
+
+  // Octogon
+  if (shape === 'octagon') {
+    return Math.abs(x) <= radius * 0.93 && Math.abs(y) <= radius * 0.93 && Math.abs(x) + Math.abs(y) <= radius * 1.32;
+  }
+
+  // Elipsă orizontală
+  if (shape === 'ellipse') {
+    const bx = radius * 1.2;
+    const by = radius * 0.72;
+    return (x * x) / (bx * bx) + (y * y) / (by * by) <= 1;
+  }
+
+  // Arc (semicercul de sus + dreptunghi de jos)
+  if (shape === 'arch') {
+    const r2 = radius * 0.93;
+    return y >= 0 ? Math.abs(x) <= r2 : Math.sqrt(x * x + y * y) <= r2;
+  }
+
+  // Săgeată (vârf sus, coadă jos)
+  if (shape === 'arrow') {
+    const shoulder = -radius * 0.2;
+    if (y <= shoulder) {
+      const progress = (y - (-radius)) / (shoulder - (-radius));
+      return Math.abs(x) <= radius * progress;
+    }
+    return Math.abs(x) <= radius * 0.38 && y <= radius * 0.98;
+  }
+
+  return true; // fallback rectangle
 }
 
 function getActiveCells(size: number, shape: MazeShapeVariant): Position[] {

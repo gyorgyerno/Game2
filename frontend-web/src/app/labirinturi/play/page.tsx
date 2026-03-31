@@ -9,22 +9,28 @@ import { SAMPLE_INTEGRAMA } from '@/lib/puzzles';
 import { gamesApi } from '@/lib/api';
 import { syncMazeLevelCompletion } from '@/store/mazeSoloProgress';
 
-type MazeShapeVariant = 'rectangle' | 'circle' | 'triangle' | 'hexagon';
+type MazeShapeVariant = 'rectangle' | 'circle' | 'triangle' | 'hexagon' | 'diamond' | 'cross' | 'octagon' | 'ellipse' | 'arch' | 'arrow';
 
 const SHAPES: Array<{ id: MazeShapeVariant; label: string; emoji: string }> = [
   { id: 'rectangle', label: 'Dreptunghi', emoji: '▭' },
-  { id: 'circle', label: 'Cerc', emoji: '◯' },
-  { id: 'triangle', label: 'Triunghi', emoji: '△' },
-  { id: 'hexagon', label: 'Hexagon', emoji: '⬡' },
+  { id: 'circle',    label: 'Cerc',       emoji: '◯' },
+  { id: 'triangle',  label: 'Triunghi',   emoji: '△' },
+  { id: 'hexagon',   label: 'Hexagon',    emoji: '⬡' },
+  { id: 'diamond',   label: 'Romb',       emoji: '◇' },
+  { id: 'cross',     label: 'Cruce',      emoji: '✚' },
+  { id: 'octagon',   label: 'Octogon',    emoji: '⯃' },
+  { id: 'ellipse',   label: 'Elipsă',     emoji: '⬭' },
+  { id: 'arch',      label: 'Arc',        emoji: '⌒' },
+  { id: 'arrow',     label: 'Săgeată',    emoji: '↑' },
 ];
 
 function LabirinturiSoloPlayInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const level = Math.max(1, parseInt(searchParams.get('level') || '1', 10));
-  const game = Math.min(3, Math.max(0, parseInt(searchParams.get('game') || '0', 10)));
+  const game = Math.max(0, parseInt(searchParams.get('game') || '0', 10));
   const shapeParam = searchParams.get('shape');
-  const shape = SHAPES.find((entry) => entry.id === shapeParam)?.id ?? SHAPES[game]?.id ?? 'rectangle';
+  const shape = SHAPES.find((entry) => entry.id === shapeParam)?.id ?? SHAPES[game % SHAPES.length]?.id ?? 'rectangle';
   const shapeMeta = SHAPES.find((entry) => entry.id === shape) ?? SHAPES[0];
 
   const [finished, setFinished] = useState(false);

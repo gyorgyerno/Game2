@@ -716,10 +716,10 @@ export default function DashboardPage() {
               {(mazeSoloLevels.length > 0 ? mazeSoloLevels : [1, 2, 3, 4, 5].map((level) => ({ level, displayName: `Nivel ${level}`, winsToUnlock: 5, gamesPerLevel: 4, maxPlayers: 2 }))).map((cfg) => {
                 const lvl = cfg.level;
                 const configuredGamesCount = cfg.gamesPerLevel ?? 4;
-                const playableGamesCount = Math.min(configuredGamesCount, 4);
+                const playableGamesCount = configuredGamesCount;
                 const firstMazeLevel = mazeSoloLevels[0]?.level ?? 1;
                 const prevCfg = mazeSoloLevels.find((entry) => entry.level === lvl - 1);
-                const prevPlayableGamesCount = Math.min(prevCfg?.gamesPerLevel ?? 4, 4);
+                const prevPlayableGamesCount = prevCfg?.gamesPerLevel ?? 4;
                 const unlocked = lvl === firstMazeLevel || Array.from({ length: prevPlayableGamesCount }, (_v, gameIdx) => mazeCompleted.has(`${lvl - 1}-${gameIdx}`)).every(Boolean);
                 const levelDone = Array.from({ length: playableGamesCount }, (_v, gameIdx) => mazeCompleted.has(`${lvl}-${gameIdx}`)).every(Boolean);
                 const completedGamesCount = Array.from({ length: playableGamesCount }, (_v, gameIdx) => mazeCompleted.has(`${lvl}-${gameIdx}`)).filter(Boolean).length;

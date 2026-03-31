@@ -6,9 +6,15 @@ import { hydrateMazeProgressFromServer } from '@/store/mazeSoloProgress';
 
 const MAZE_SHAPES = [
   { id: 'rectangle', label: 'Dreptunghi', emoji: '▭' },
-  { id: 'circle', label: 'Cerc', emoji: '◯' },
-  { id: 'triangle', label: 'Triunghi', emoji: '△' },
-  { id: 'hexagon', label: 'Hexagon', emoji: '⬡' },
+  { id: 'circle',    label: 'Cerc',       emoji: '◯' },
+  { id: 'triangle',  label: 'Triunghi',   emoji: '△' },
+  { id: 'hexagon',   label: 'Hexagon',    emoji: '⬡' },
+  { id: 'diamond',   label: 'Romb',       emoji: '◇' },
+  { id: 'cross',     label: 'Cruce',      emoji: '✚' },
+  { id: 'octagon',   label: 'Octogon',    emoji: '⯃' },
+  { id: 'ellipse',   label: 'Elipsă',     emoji: '⬭' },
+  { id: 'arch',      label: 'Arc',        emoji: '⌒' },
+  { id: 'arrow',     label: 'Săgeată',    emoji: '↑' },
 ] as const;
 
 const LEVEL_COLORS = [
@@ -38,6 +44,13 @@ const DEFAULT_MAZE_LEVELS: MazeLevelConfig[] = [1, 2, 3, 4, 5].map((level) => ({
   displayName: `Nivel ${level}`,
   gamesPerLevel: 4,
 }));
+
+/** Alocă deterministă o formă pentru (nivel, indexJoc). Ciclează prin toate formele disponibile.
+ * Multiplicatorul prim 13 > MAZE_SHAPES.length asigură offset diferit per nivel.
+ */
+function getShapeForGame(level: number, gameIdx: number) {
+  return MAZE_SHAPES[(level * 13 + gameIdx) % MAZE_SHAPES.length];
+}
 
 export default function LabirinturiSoloPage() {
   const [mounted, setMounted] = useState(false);
@@ -78,10 +91,9 @@ export default function LabirinturiSoloPage() {
           {levelConfigs.map((cfg, idx) => {
             const level = cfg.level;
             const configuredGamesCount = cfg.gamesPerLevel ?? 4;
-            const playableGamesCount = Math.min(configuredGamesCount, MAZE_SHAPES.length);
-            const missingGamesCount = Math.max(0, configuredGamesCount - playableGamesCount);
+            const playableGamesCount = configuredGamesCount;
             const prevCfg = levelConfigs.find((entry) => entry.level === level - 1);
-            const prevPlayableGamesCount = Math.min(prevCfg?.gamesPerLevel ?? 4, MAZE_SHAPES.length);
+            const prevPlayableGamesCount = prevCfg?.gamesPerLevel ?? 4;
             const levelUnlocked = !mounted
               ? level === levelConfigs[0]?.level
               : level === levelConfigs[0]?.level || Array.from({ length: prevPlayableGamesCount }, (_v, gameIdx) => completed.has(`${level - 1}-${gameIdx}`)).every(Boolean);
@@ -108,20 +120,17 @@ export default function LabirinturiSoloPage() {
                       🌀 {configuredGamesCount} jocuri
                     </div>
                     <div className={`text-xs mt-0.5 ${levelUnlocked ? 'text-white/80' : 'text-white/40'}`}>
-                      {MAZE_SHAPES.slice(0, playableGamesCount).map((s) => s.emoji).join(' · ')}
+                      {Array.from({ length: Math.min(playableGamesCount, 8) }, (_, i) => getShapeForGame(level, i).emoji).join(' · ')}{playableGamesCount > 8 ? ' ···' : ''}
                     </div>
                     {!levelUnlocked && <div className="text-lg mt-1">🔒</div>}
                   </div>
                 </div>
 
-                {missingGamesCount > 0 && (
-                  <div className="px-6 py-3 text-xs text-amber-200 bg-amber-950/40 border-t border-amber-500/20">
-                    Configurat: {configuredGamesCount} jocuri. Disponibile acum: {playableGamesCount}. Restul sunt în curs de publicare.
-                  </div>
-                )}
+
 
                 <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {MAZE_SHAPES.slice(0, playableGamesCount).map((shape, gameIdx) => {
+                  {Array.from({ length: playableGamesCount }, (_, gameIdx) => {
+                    const shape = getShapeForGame(level, gameIdx);
                     const unlocked = !mounted
                       ? (level === levelConfigs[0]?.level && gameIdx === 0)
                       : (gameIdx === 0
@@ -132,7 +141,7 @@ export default function LabirinturiSoloPage() {
                     if (unlocked) {
                       return (
                         <Link
-                          key={shape.id}
+                          key={`${level}-${gameIdx}`}
                           href={`/labirinturi/play?level=${level}&game=${gameIdx}&shape=${shape.id}`}
                           className="flex flex-col items-center gap-2 p-4 py-6 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all group min-h-[120px] justify-center"
                         >
@@ -151,7 +160,7 @@ export default function LabirinturiSoloPage() {
 
                     return (
                       <div
-                        key={shape.id}
+                        key={`${level}-${gameIdx}`}
                         className="flex flex-col items-center gap-2 p-4 py-6 rounded-xl bg-slate-800/40 border border-slate-800 cursor-not-allowed select-none min-h-[120px] justify-center"
                       >
                         <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-500 text-xl">
@@ -159,20 +168,6 @@ export default function LabirinturiSoloPage() {
                         </div>
                         <span className="text-sm font-medium text-slate-600">{shape.label}</span>
                         <span className="text-xs text-slate-700">Blocat</span>
-                      </div>
-                    );
-                  })}
-
-                  {Array.from({ length: missingGamesCount }, (_v, missingIdx) => {
-                    const gameNumber = playableGamesCount + missingIdx + 1;
-                    return (
-                      <div
-                        key={`missing-${level}-${gameNumber}`}
-                        className="flex flex-col items-center gap-2 p-4 py-6 rounded-xl bg-amber-950/20 border border-dashed border-amber-700/40 select-none min-h-[120px] justify-center"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-amber-900/50 flex items-center justify-center text-amber-300 text-xl">…</div>
-                        <span className="text-sm font-medium text-amber-100">Joc {gameNumber}</span>
-                        <span className="text-xs text-amber-300/80">În curând</span>
                       </div>
                     );
                   })}
