@@ -9,7 +9,7 @@ import { config } from '../config';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { asyncHandler } from '../middleware/errorHandler';
 import { gameRegistry } from '../games/GameRegistry';
-import { systemConfigService, DEFAULT_ELO, DEFAULT_XP, DEFAULT_LEAGUE, ELO_LIMITS, XP_LIMITS, LEAGUE_LIMITS } from '../services/SystemConfigService';
+import { systemConfigService, DEFAULT_ELO, DEFAULT_XP, DEFAULT_LEAGUE, DEFAULT_UI, ELO_LIMITS, XP_LIMITS, LEAGUE_LIMITS } from '../services/SystemConfigService';
 import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/SimulatedMatchOrchestrator';
 import { activityFeedGenerator } from '../services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from '../services/simulatedPlayers/BotChatGenerator';
@@ -1625,11 +1625,37 @@ router.patch('/system-config/league', adminAuth, asyncHandler(async (req: AdminR
   res.json({ league: systemConfigService.getLeague(), defaults: DEFAULT_LEAGUE });
 }));
 
+// ─── PATCH /api/admin/system-config/ui ───────────────────────────────────────
+router.patch('/system-config/ui', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { aiAssistantEnabled } = req.body as { aiAssistantEnabled?: boolean };
+
+  if (aiAssistantEnabled !== undefined && typeof aiAssistantEnabled !== 'boolean') {
+    res.status(400).json({ error: 'aiAssistantEnabled trebuie să fie boolean' });
+    return;
+  }
+
+  const current = systemConfigService.getUi();
+  const merged = {
+    ...current,
+    ...(aiAssistantEnabled !== undefined ? { aiAssistantEnabled } : {}),
+  };
+
+  await prisma.systemConfig.upsert({
+    where: { key: 'ui' },
+    create: { key: 'ui', value: JSON.stringify(merged), updatedBy: req.adminUsername },
+    update: { value: JSON.stringify(merged), updatedBy: req.adminUsername },
+  });
+  systemConfigService.setUi(merged);
+
+  logger.info('[ADMIN] SystemConfig UI updated', { admin: req.adminUsername, merged });
+  res.json({ ui: systemConfigService.getUi(), defaults: DEFAULT_UI });
+}));
+
 // ─── DELETE /api/admin/system-config/:key — reset la default ─────────────────
 router.delete('/system-config/:key', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
   const key = req.params.key;
-  if (!['elo', 'xp', 'league'].includes(key)) {
-    res.status(400).json({ error: 'Key invalid. Valori acceptate: elo, xp, league' });
+  if (!['elo', 'xp', 'league', 'ui'].includes(key)) {
+    res.status(400).json({ error: 'Key invalid. Valori acceptate: elo, xp, league, ui' });
     return;
   }
 
@@ -1638,6 +1664,7 @@ router.delete('/system-config/:key', adminAuth, asyncHandler(async (req: AdminRe
   if (key === 'elo')    systemConfigService.setElo({ ...DEFAULT_ELO });
   if (key === 'xp')     systemConfigService.setXp({ ...DEFAULT_XP });
   if (key === 'league') systemConfigService.setLeague({ ...DEFAULT_LEAGUE });
+  if (key === 'ui')     systemConfigService.setUi({ ...DEFAULT_UI });
 
   logger.info(`[ADMIN] SystemConfig ${key} reset la default`, { admin: req.adminUsername });
   res.json({ ok: true, reset: key });

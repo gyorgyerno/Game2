@@ -55,8 +55,14 @@ function GamePlayPageInner({ params }: PageProps) {
   const [lastReaction, setLastReaction] = useState<{ userId: string; emoji: string; fromMe: boolean } | null>(null);
   const [latestMetrics, setLatestMetrics] = useState<Record<string, unknown> | undefined>(undefined);
   const [mazeSeed, setMazeSeed] = useState<number | undefined>(undefined);
+  const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const staticRules = GAME_RULES[canonicalGameType] || GAME_RULES['integrame'];
   const [serverTimeLimit, setServerTimeLimit] = useState<number>(staticRules.timeLimit);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Fetch timeLimit din admin (suprascrie valoarea hardcoded din shared)
   useEffect(() => {
@@ -64,6 +70,12 @@ function GamePlayPageInner({ params }: PageProps) {
       .then((r) => setServerTimeLimit(r.data.timeLimit))
       .catch(() => {});
   }, [canonicalGameType]);
+
+  useEffect(() => {
+    gamesApi.getUiConfig()
+      .then((r) => setAiAssistantEnabled(r.data.aiAssistantEnabled))
+      .catch(() => {});
+  }, []);
 
   const puzzle: CrosswordPuzzle = aiPuzzle || SAMPLE_INTEGRAMA;
   const rules = { ...staticRules, timeLimit: serverTimeLimit };
@@ -226,6 +238,10 @@ function GamePlayPageInner({ params }: PageProps) {
   const maxPlayers = MAX_PLAYERS_PER_LEVEL[level];
   const gameDef = getGameByType(gameType);
 
+  if (!mounted) {
+    return <div className="game-page min-h-screen bg-white" />;
+  }
+
   return (
     <div className="game-page min-h-screen bg-white">
 
@@ -328,7 +344,7 @@ function GamePlayPageInner({ params }: PageProps) {
       </main>
 
       {/* AI Chat */}
-      <AIChatWidget />
+      {aiAssistantEnabled && <AIChatWidget />}
 
       {/* Emoji Reactions */}
       {started && !finished && (

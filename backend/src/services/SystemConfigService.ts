@@ -42,6 +42,11 @@ export interface LeagueConfig {
   diamond: number;
 }
 
+export interface UiConfig {
+  /** Activează widget-ul Asistent AI în pagina de joc */
+  aiAssistantEnabled: boolean;
+}
+
 // ─── Default-uri (identice cu shared/) ───────────────────────────────────────
 
 export const DEFAULT_ELO: Readonly<EloConfig> = {
@@ -64,6 +69,10 @@ export const DEFAULT_LEAGUE: Readonly<LeagueConfig> = {
   gold: 1400,
   platinum: 1600,
   diamond: 1800,
+};
+
+export const DEFAULT_UI: Readonly<UiConfig> = {
+  aiAssistantEnabled: true,
 };
 
 // ─── Limite de validare ───────────────────────────────────────────────────────
@@ -90,6 +99,7 @@ class SystemConfigService {
   private elo: EloConfig = { ...DEFAULT_ELO };
   private xp: XpConfig = { ...DEFAULT_XP };
   private league: LeagueConfig = { ...DEFAULT_LEAGUE };
+  private ui: UiConfig = { ...DEFAULT_UI };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async load(prismaClient: any): Promise<void> {
@@ -101,6 +111,7 @@ class SystemConfigService {
           if (row.key === 'elo')    this.elo    = { ...DEFAULT_ELO,    ...val };
           if (row.key === 'xp')     this.xp     = { ...DEFAULT_XP,     ...val };
           if (row.key === 'league') this.league = { ...DEFAULT_LEAGUE, ...val };
+          if (row.key === 'ui')     this.ui     = { ...DEFAULT_UI,     ...val };
         } catch { /* invalid JSON — ignorat */ }
       }
     } catch (err) {
@@ -113,12 +124,14 @@ class SystemConfigService {
   getElo(): EloConfig    { return { ...this.elo }; }
   getXp(): XpConfig      { return { ...this.xp }; }
   getLeague(): LeagueConfig { return { ...this.league }; }
+  getUi(): UiConfig      { return { ...this.ui }; }
 
   // ─── Setters (doar în memorie — salvarea în DB se face în admin route) ────────
 
   setElo(cfg: Partial<EloConfig>): void    { Object.assign(this.elo, cfg); }
   setXp(cfg: Partial<XpConfig>): void      { Object.assign(this.xp, cfg); }
   setLeague(cfg: Partial<LeagueConfig>): void { Object.assign(this.league, cfg); }
+  setUi(cfg: Partial<UiConfig>): void      { Object.assign(this.ui, cfg); }
 
   // ─── Funcții de calcul (înlocuiesc cele din shared/) ──────────────────────────
 
@@ -163,10 +176,12 @@ class SystemConfigService {
       elo:    this.getElo(),
       xp:     this.getXp(),
       league: this.getLeague(),
+      ui:     this.getUi(),
       defaults: {
         elo:    DEFAULT_ELO,
         xp:     DEFAULT_XP,
         league: DEFAULT_LEAGUE,
+        ui:     DEFAULT_UI,
       },
       limits: {
         elo: ELO_LIMITS,

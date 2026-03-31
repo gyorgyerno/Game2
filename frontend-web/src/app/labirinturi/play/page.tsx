@@ -56,11 +56,22 @@ function LabirinturiSoloPlayInner() {
   }, []);
 
   const [seconds, setSeconds] = useState<number | null>(null);
+  const [levelGamesCount, setLevelGamesCount] = useState<number>(4);
+  const [levelDifficulty, setLevelDifficulty] = useState<number | undefined>(undefined);
   useEffect(() => {
     gamesApi.getRules('labirinturi')
       .then(res => setSeconds(res.data.timeLimit))
       .catch(() => setSeconds(60));
-  }, []);
+    gamesApi.getLevels('labirinturi')
+      .then(res => {
+        const cfg = res.data.find((l) => l.level === level);
+        if (cfg) {
+          setLevelGamesCount(cfg.gamesPerLevel);
+          setLevelDifficulty(cfg.difficultyValue);
+        }
+      })
+      .catch(() => {});
+  }, [level]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -75,7 +86,7 @@ function LabirinturiSoloPlayInner() {
             {!finished && seconds !== null && seconds > 0 && (
               <GameTimer key={mazeSeed} seconds={seconds} onExpire={() => {
                 if (score > 0) {
-                  syncMazeLevelCompletion(level, game, score);
+                  syncMazeLevelCompletion(level, game, score, levelGamesCount);
                 }
                 setFinished(true);
               }} />
@@ -121,6 +132,7 @@ function LabirinturiSoloPlayInner() {
           shapeVariant={shape}
           mazeSeed={mazeSeed}
           puzzle={SAMPLE_INTEGRAMA}
+          difficultyValue={levelDifficulty}
           onProgress={(correct, wrong) => {
             setScore(correct);
             setMistakes(wrong);
@@ -128,7 +140,7 @@ function LabirinturiSoloPlayInner() {
           onFinish={(correct, wrong) => {
             setScore(correct);
             setMistakes(wrong);
-            syncMazeLevelCompletion(level, game, correct);
+            syncMazeLevelCompletion(level, game, correct, levelGamesCount);
             setFinished(true);
           }}
         />

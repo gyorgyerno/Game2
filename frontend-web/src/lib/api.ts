@@ -145,6 +145,8 @@ export const friendsApi = {
 export const gamesApi = {
   getAll:       ()             => api.get('/games'),
   getRules:     (gameType: string) => api.get<{ timeLimit: number; pointsPerCorrect: number; pointsPerMistake: number; bonusCompletion: number; bonusFirstFinisher: number; forfeitBonus: number }>(`/games/rules/${gameType}`),
+  getLevels:    (gameType: string) => api.get<Array<{ level: number; displayName: string; gamesPerLevel: number; maxPlayers: number; winsToUnlock: number; difficultyValue: number }>>(`/games/levels/${gameType}`),
+  getUiConfig:  () => api.get<{ aiAssistantEnabled: boolean }>('/games/ui-config'),
 };
 
 // ─── Contests ─────────────────────────────────────────────────────────────────

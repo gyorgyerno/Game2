@@ -118,14 +118,15 @@ interface EloConfig {
 }
 interface XpConfig { perWin: number; perLoss: number; perDraw: number; bonusTop3: number; }
 interface LeagueConfig { silver: number; gold: number; platinum: number; diamond: number; }
+interface UiConfig { aiAssistantEnabled: boolean; }
 interface SystemConfigLimits {
   elo: { kFactor: { min: number; max: number }; threshold: { min: number; max: number } };
   xp: { perWin: { min: number; max: number }; perLoss: { min: number; max: number }; perDraw: { min: number; max: number }; bonusTop3: { min: number; max: number } };
   league: { rating: { min: number; max: number } };
 }
 interface SystemConfigData {
-  elo: EloConfig; xp: XpConfig; league: LeagueConfig;
-  defaults: { elo: EloConfig; xp: XpConfig; league: LeagueConfig };
+  elo: EloConfig; xp: XpConfig; league: LeagueConfig; ui: UiConfig;
+  defaults: { elo: EloConfig; xp: XpConfig; league: LeagueConfig; ui: UiConfig };
   limits: SystemConfigLimits;
 }
 
@@ -401,6 +402,7 @@ export default function SettingsPage() {
 
           {sysConfig && !sysLoadErr && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <UiSection sys={sysConfig} onSaved={(data) => setSysConfig(data)} showToast={showToast} />
               <EloSection sys={sysConfig} onSaved={(data) => setSysConfig(data)} showToast={showToast} />
               <XpSection sys={sysConfig} onSaved={(data) => setSysConfig(data)} showToast={showToast} />
               <LeagueSection sys={sysConfig} onSaved={(data) => setSysConfig(data)} showToast={showToast} />
@@ -842,6 +844,85 @@ function SmallBtn({ color, onClick, children }: {
     >
       {children}
     </button>
+  );
+}
+
+// ─── UiSection ────────────────────────────────────────────────────────────────
+function UiSection({ sys, onSaved, showToast }: {
+  sys: SystemConfigData;
+  onSaved: (data: SystemConfigData) => void;
+  showToast: (msg: string, type: 'ok' | 'err') => void;
+}) {
+  const [saving, setSaving] = useState(false);
+
+  async function handleToggle(nextEnabled: boolean) {
+    setSaving(true);
+    try {
+      await adminApi.patch('/api/admin/system-config/ui', { aiAssistantEnabled: nextEnabled });
+      const res = await adminApi.get('/api/admin/system-config');
+      onSaved(res.data);
+      showToast(`Asistent AI ${nextEnabled ? 'activat' : 'dezactivat'} ✓`, 'ok');
+    } catch {
+      showToast('Eroare la salvare', 'err');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleReset() {
+    try {
+      await adminApi.delete('/api/admin/system-config/ui');
+      const res = await adminApi.get('/api/admin/system-config');
+      onSaved(res.data);
+      showToast('Setările UI resetate la default ✓', 'ok');
+    } catch {
+      showToast('Eroare la reset', 'err');
+    }
+  }
+
+  const enabled = sys.ui?.aiAssistantEnabled ?? true;
+  const defaultEnabled = sys.defaults?.ui?.aiAssistantEnabled ?? true;
+  const isDefault = enabled === defaultEnabled;
+
+  return (
+    <div style={{ background: '#1a1d27', border: '1px solid #0ea5e944', borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 20px', background: '#0ea5e911', borderBottom: '1px solid #0ea5e933',
+      }}>
+        <span style={{ fontWeight: 700, color: '#38bdf8', fontSize: 16 }}>Assistant UI</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <SmallBtn color="#dc2626" onClick={handleReset}>🔄 Reset default</SmallBtn>
+        </div>
+      </div>
+
+      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ color: '#94a3b8', fontSize: 13 }}>
+          Controlează vizibilitatea widget-ului <strong style={{ color: '#e2e8f0' }}>Asistent AI</strong> din pagina de joc.
+        </div>
+
+        <label style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: '#0f1117', border: '1px solid #1e2535', borderRadius: 8,
+          padding: '12px 14px', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.65 : 1,
+        }}>
+          <div>
+            <div style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600 }}>Asistent AI în meci</div>
+            <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
+              {enabled ? 'Vizibil pentru jucători' : 'Ascuns pentru jucători'}
+              {!isDefault && <span style={{ marginLeft: 8 }}>(default: {defaultEnabled ? 'ON' : 'OFF'})</span>}
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={saving}
+            onChange={(e) => handleToggle(e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: '#0ea5e9' }}
+          />
+        </label>
+      </div>
+    </div>
   );
 }
 

@@ -88,12 +88,12 @@ export async function hydrateMazeProgressFromServer(): Promise<Set<string>> {
   }
 }
 
-export async function syncMazeLevelCompletion(level: number, gameIndex: number, score = 0): Promise<void> {
+export async function syncMazeLevelCompletion(level: number, gameIndex: number, score = 0, gamesPerLevel = MAZE_GAMES_PER_LEVEL): Promise<void> {
   markMazeLevelCompleted(level, gameIndex);
 
   try {
     const completed = load();
-    const allLevelGamesCompleted = Array.from({ length: MAZE_GAMES_PER_LEVEL }, (_v, index) =>
+    const allLevelGamesCompleted = Array.from({ length: gamesPerLevel }, (_v, index) =>
       completed.has(key(level, index))
     ).every(Boolean);
 

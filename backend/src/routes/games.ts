@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { gameRegistry } from '../games/GameRegistry';
 import prisma from '../prisma';
 import { gameLevelConfigService } from '../services/GameLevelConfigService';
+import { systemConfigService } from '../services/SystemConfigService';
 
 const router = Router();
 
@@ -89,7 +90,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/games/levels/:gameType — config publică a nivelelor (fără auth)
-// Returnează: [{ level, displayName, winsToUnlock, gamesPerLevel, maxPlayers }]
+// Returnează: [{ level, displayName, winsToUnlock, gamesPerLevel, maxPlayers, difficultyValue }]
 router.get('/levels/:gameType', async (req, res) => {
   const { gameType } = req.params as { gameType: string };
   const levels = gameLevelConfigService.getActiveLevels(gameType);
@@ -100,6 +101,7 @@ router.get('/levels/:gameType', async (req, res) => {
       winsToUnlock: l.winsToUnlock,
       gamesPerLevel: l.gamesPerLevel,
       maxPlayers: l.maxPlayers,
+      difficultyValue: l.difficultyValue,
     }))
   );
 });
@@ -116,6 +118,14 @@ router.get('/rules/:gameType', (req, res) => {
     bonusCompletion: rules.bonusCompletion,
     bonusFirstFinisher: rules.bonusFirstFinisher,
     forfeitBonus: rules.forfeitBonus,
+  });
+});
+
+// GET /api/games/ui-config — config public pentru elemente UI runtime
+router.get('/ui-config', (_req, res) => {
+  const ui = systemConfigService.getUi();
+  return res.json({
+    aiAssistantEnabled: ui.aiAssistantEnabled,
   });
 });
 

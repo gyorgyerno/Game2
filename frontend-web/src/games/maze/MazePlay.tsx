@@ -16,6 +16,8 @@ type MazeShapeVariant = 'rectangle' | 'circle' | 'triangle' | 'hexagon' | 'diamo
 
 interface MazePlayProps extends GamePlayProps {
   shapeVariant?: MazeShapeVariant;
+  /** 0-100: dificultatea nivelului din admin. Folosit pentru a calcula mazeSize, bonusuri, penalizări. */
+  difficultyValue?: number;
 }
 
 /** LCG deterministă (Numerical Recipes). Returnează float în [0, 1). */
@@ -190,10 +192,14 @@ function starPath(cx: number, cy: number, outerR: number, innerR: number): strin
   return `M${pts.join('L')}Z`;
 }
 
-export default function MazePlay({ started, finished, level = 1, onProgress, onFinish, shapeVariant = 'rectangle', mazeSeed }: MazePlayProps) {
-  const mazeSize = level <= 1 ? 9 : level === 2 ? 11 : level === 3 ? 13 : level === 4 ? 15 : 17;
-  const bonusCount = level <= 2 ? 2 : level === 3 ? 3 : 4;
-  const shouldPenalizeWalls = level >= 4;
+export default function MazePlay({ started, finished, level = 1, onProgress, onFinish, shapeVariant = 'rectangle', mazeSeed, difficultyValue }: MazePlayProps) {
+  // Dacă difficultyValue e furnizat din admin, derivăm parametrii din el (0=ușor, 100=greu)
+  // Altfel fallback la formula bazată pe nivel (backward-compatible)
+  const diff = difficultyValue ?? Math.min(100, (level - 1) * 25);
+  const rawSize = 9 + Math.round((diff / 100) * 8);
+  const mazeSize = rawSize % 2 === 0 ? rawSize + 1 : rawSize; // forțăm număr impar
+  const bonusCount = diff <= 25 ? 2 : diff <= 75 ? 3 : 4;
+  const shouldPenalizeWalls = diff >= 75;
   const cellSize = 32;
 
   const activeCells = useMemo(() => getActiveCells(mazeSize, shapeVariant), [mazeSize, shapeVariant]);
@@ -431,8 +437,6 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
         <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-rose-400 font-semibold">🧱 Pereți: {wallHits}</div>
         <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-violet-400 font-semibold">🎯 Nivel: {level}</div>
       </div>
-
-      <div className="text-sm text-cyan-400 font-semibold">Formă: {shapeVariant === 'rectangle' ? 'Dreptunghi' : shapeVariant === 'circle' ? 'Cerc' : shapeVariant === 'triangle' ? 'Triunghi' : 'Hexagon'}</div>
 
       <div
         className="relative w-fit bg-slate-950 border-2 border-cyan-900/50 rounded-3xl p-4 select-none touch-none shadow-[0_0_48px_rgba(6,182,212,0.18)]"
