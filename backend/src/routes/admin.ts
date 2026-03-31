@@ -1901,6 +1901,7 @@ router.get('/contests', adminAuth, asyncHandler(async (_req: Request, res: Respo
     startAt: c.startAt.toISOString(),
     endAt: c.endAt.toISOString(),
     maxPlayers: c.maxPlayers,
+    botsCount: c.botsCount,
     createdBy: c.createdBy,
     createdAt: c.createdAt.toISOString(),
     registeredCount: c._count.players,
@@ -1915,7 +1916,7 @@ router.get('/contests', adminAuth, asyncHandler(async (_req: Request, res: Respo
 router.post('/contests', adminAuth, asyncHandler(async (req: Request, res: Response) => {
   const reqA = req as AdminRequest;
   interface RoundInput { order: number; label: string; gameType: string; minLevel: number; matchesCount: number; }
-  const { name, slug, description, type, startAt, endAt, maxPlayers, rounds } = req.body as {
+  const { name, slug, description, type, startAt, endAt, maxPlayers, botsCount, rounds } = req.body as {
     name: string;
     slug: string;
     description?: string;
@@ -1923,6 +1924,7 @@ router.post('/contests', adminAuth, asyncHandler(async (req: Request, res: Respo
     startAt: string;
     endAt: string;
     maxPlayers?: number | null;
+    botsCount?: number;
     rounds: RoundInput[];
   };
 
@@ -1953,6 +1955,7 @@ router.post('/contests', adminAuth, asyncHandler(async (req: Request, res: Respo
       startAt: new Date(startAt),
       endAt: new Date(endAt),
       maxPlayers: maxPlayers ?? null,
+      botsCount: botsCount ?? 0,
       createdBy: reqA.adminUsername ?? 'admin',
       rounds: {
         create: rounds.map((r: RoundInput) => ({
@@ -1984,13 +1987,14 @@ router.patch('/contests/:id', adminAuth, asyncHandler(async (req: Request, res: 
   const reqA = req as AdminRequest;
   const { id } = req.params;
   interface RoundInput { order: number; label: string; gameType: string; minLevel: number; matchesCount: number; }
-  const { name, description, type, startAt, endAt, maxPlayers, rounds } = req.body as {
+  const { name, description, type, startAt, endAt, maxPlayers, botsCount, rounds } = req.body as {
     name?: string;
     description?: string;
     type?: string;
     startAt?: string;
     endAt?: string;
     maxPlayers?: number | null;
+    botsCount?: number;
     rounds?: RoundInput[];
   };
 
@@ -2010,6 +2014,7 @@ router.patch('/contests/:id', adminAuth, asyncHandler(async (req: Request, res: 
       ...(startAt && { startAt: new Date(startAt) }),
       ...(endAt && { endAt: new Date(endAt) }),
       ...(maxPlayers !== undefined && { maxPlayers: maxPlayers ?? null }),
+      ...(botsCount !== undefined && { botsCount }),
     },
     include: {
       rounds: { orderBy: { order: 'asc' } },

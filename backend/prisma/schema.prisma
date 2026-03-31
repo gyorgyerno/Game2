@@ -405,7 +405,7 @@ model BannedIP {
 
 // ─── Contest ──────────────────────────────────────────────────────────────────
 // Un concurs/turneu care poate conține unul sau mai multe jocuri.
-// status: waiting (pre-înregistrare) → live (activ, scoruri valide) → ended (final)
+// status: waiting (pre-înregistrare) → live (activ, scoruri valide) → ended (final) | cancelled (anulat automat la start dacă 0 jucători)
 model Contest {
   id          String    @id @default(cuid())
   name        String
@@ -416,6 +416,7 @@ model Contest {
   startAt     DateTime
   endAt       DateTime
   maxPlayers  Int?      // null = nelimitat
+  botsCount   Int       @default(0) // boți SIMULATED auto-înregistrați la start
   createdBy   String    @default("admin")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

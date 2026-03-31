@@ -101,15 +101,29 @@ class ContestEngine {
     if (!this.initialized) return;
     const now = new Date();
 
-    // waiting → live
+    // waiting → live (sau cancelled dacă 0 jucători după enroll boți)
     const toActivate = await this.prisma.contest.findMany({
       where: { status: 'waiting', startAt: { lte: now } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, botsCount: true, maxPlayers: true, _count: { select: { players: true } } },
     });
     for (const c of toActivate) {
-      await this.prisma.contest.update({ where: { id: c.id }, data: { status: 'live' } });
-      this.io.to(`contest:${c.id}`).emit('contest_status_change', { contestId: c.id, status: 'live' });
-      logger.info(`[ContestEngine] Contest "${c.name}" → LIVE`);
+      // Auto-înregistrare boți SIMULATED dacă botsCount > 0
+      if (c.botsCount > 0) {
+        await this.enrollBots(c.id, c.botsCount, c.maxPlayers, c._count.players);
+      }
+
+      // Recalculăm numărul de jucători după enroll boți
+      const playerCount = await this.prisma.contestPlayer.count({ where: { contestId: c.id } });
+
+      if (playerCount === 0) {
+        await this.prisma.contest.update({ where: { id: c.id }, data: { status: 'cancelled' } });
+        this.io.to(`contest:${c.id}`).emit('contest_status_change', { contestId: c.id, status: 'cancelled' });
+        logger.info(`[ContestEngine] Contest "${c.name}" → CANCELLED (0 jucători)`);
+      } else {
+        await this.prisma.contest.update({ where: { id: c.id }, data: { status: 'live' } });
+        this.io.to(`contest:${c.id}`).emit('contest_status_change', { contestId: c.id, status: 'live' });
+        logger.info(`[ContestEngine] Contest "${c.name}" → LIVE (${playerCount} jucători, din care boți: ${c.botsCount})`);
+      }
     }
 
     // live → ended
@@ -125,6 +139,35 @@ class ContestEngine {
       this.io.to(`contest:${c.id}`).emit('contest_leaderboard_update', { contestId: c.id, leaderboard: lb });
       logger.info(`[ContestEngine] Contest "${c.name}" → ENDED`);
     }
+  }
+
+  // ─── Auto-înregistrare boți SIMULATED ────────────────────────────────────────
+
+  private async enrollBots(contestId: string, botsCount: number, maxPlayers: number | null, currentPlayers: number) {
+    const slots = maxPlayers !== null ? Math.min(botsCount, maxPlayers - currentPlayers) : botsCount;
+    if (slots <= 0) return;
+
+    // Luăm boți care nu sunt deja înregistrați la acest concurs
+    const alreadyIn = await this.prisma.contestPlayer.findMany({
+      where: { contestId },
+      select: { userId: true },
+    });
+    const alreadyInIds = alreadyIn.map(p => p.userId);
+
+    const bots = await this.prisma.user.findMany({
+      where: { userType: 'SIMULATED', id: { notIn: alreadyInIds } },
+      select: { id: true },
+      take: slots,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (bots.length === 0) return;
+
+    await this.prisma.contestPlayer.createMany({
+      data: bots.map(b => ({ contestId, userId: b.id })),
+    });
+
+    logger.info(`[ContestEngine] Auto-înregistrați ${bots.length} boți la concurs ${contestId}`);
   }
 
   // ─── Hook din finalizeMatch (apelat pentru fiecare jucător REAL) ──────────────

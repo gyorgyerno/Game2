@@ -36,6 +36,7 @@ interface ContestRow {
   startAt: string;
   endAt: string;
   maxPlayers: number | null;
+  botsCount: number;
   createdBy: string;
   createdAt: string;
   registeredCount: number;
@@ -82,6 +83,7 @@ interface CreateForm {
   startAt: string;
   endAt: string;
   maxPlayers: string;
+  botsCount: string;
   rounds: RoundForm[];
 }
 
@@ -92,6 +94,7 @@ const EMPTY_FORM: CreateForm = {
   type: 'public',
   startAt: '', endAt: '',
   maxPlayers: '',
+  botsCount: '0',
   rounds: [{ ...EMPTY_ROUND }],
 };
 
@@ -211,6 +214,7 @@ export default function AdminContestsPage() {
         startAt: form.startAt,
         endAt: form.endAt,
         maxPlayers: form.maxPlayers ? Number(form.maxPlayers) : null,
+        botsCount: Number(form.botsCount) || 0,
         rounds: form.rounds.map((r, i) => ({ order: i + 1, label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
       };
       if (editingId) {
@@ -239,6 +243,7 @@ export default function AdminContestsPage() {
       startAt: c.startAt.slice(0, 16),
       endAt: c.endAt.slice(0, 16),
       maxPlayers: c.maxPlayers != null ? String(c.maxPlayers) : '',
+      botsCount: String(c.botsCount ?? 0),
       rounds: c.rounds.map(r => ({ label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
     });
     setEditingId(c.id);
@@ -371,6 +376,18 @@ export default function AdminContestsPage() {
                 value={form.maxPlayers}
                 onChange={e => setForm(f => ({ ...f, maxPlayers: e.target.value }))}
               />
+            </Field>
+            <Field label="Boți auto-înscriși la start (0 = fără boți)">
+              <input
+                type="number"
+                min="0"
+                max="50"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm"
+                placeholder="ex: 5"
+                value={form.botsCount}
+                onChange={e => setForm(f => ({ ...f, botsCount: e.target.value }))}
+              />
+              <p className="text-xs text-gray-500 mt-1">Boții SIMULATED vor fi înregistrați automat când concursul devine LIVE</p>
             </Field>
           </div>
 

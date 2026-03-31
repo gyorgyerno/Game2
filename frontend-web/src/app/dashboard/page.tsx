@@ -75,7 +75,11 @@ export default function DashboardPage() {
     fetchMe();
     matchesApi.getHistory().then((r) => setRecentMatches(r.data)).catch(() => {});
     statsApi.getMyStats().then((r) => setStats(r.data)).catch(() => {});
-    contestsApi.list().then((r) => setActiveContests(r.data.contests ?? [])).catch(() => {});
+    const fetchContests = () =>
+      contestsApi.list().then((r) => setActiveContests(r.data.contests ?? [])).catch(() => {});
+    fetchContests();
+    const contestInterval = setInterval(fetchContests, 60_000);
+    return () => clearInterval(contestInterval);
   }, [_hasHydrated, token]);
 
   useEffect(() => {
@@ -373,9 +377,9 @@ export default function DashboardPage() {
         <div className="space-y-8">
 
         {/* Concursuri active / viitoare */}
-        {activeContests.length > 0 && (
+        {activeContests.filter(c => c.status === 'waiting' || c.status === 'live').length > 0 && (
           <div className="space-y-3">
-            {activeContests.map((c) => {
+            {activeContests.filter(c => c.status === 'waiting' || c.status === 'live').map((c) => {
               const isLive = c.status === 'live';
               const startDate = new Date(c.startAt).toLocaleString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
               const endDate = new Date(c.endAt).toLocaleString('ro-RO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
