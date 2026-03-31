@@ -15,10 +15,19 @@ export default function GameTimer({ seconds, onExpire }: Props) {
   }, [seconds]);
 
   useEffect(() => {
+    // seconds === 0 = fără limită de timp — nu pornește countdown-ul
+    if (seconds === 0) return;
     if (left <= 0) { onExpire?.(); return; }
     const t = setTimeout(() => setLeft((s) => s - 1), 1000);
     return () => clearTimeout(t);
-  }, [left]);
+  }, [left, seconds]);
+
+  // Mod infinit
+  if (seconds === 0) {
+    return (
+      <p className="text-sm font-semibold text-gray-400">∞ Fără limită de timp</p>
+    );
+  }
 
   const urgent = left <= 30;
   const critical = left <= 10;

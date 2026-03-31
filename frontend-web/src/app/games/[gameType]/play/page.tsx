@@ -11,7 +11,7 @@ import GameTimer from '@/components/game/GameTimer';
 import EmojiReactions from '@/components/game/EmojiReactions';
 import GameLobbyPanel from '@/components/game/GameLobbyPanel';
 import { useAuthStore } from '@/store/auth';
-import { matchesApi, aiApi } from '@/lib/api';
+import { matchesApi, aiApi, gamesApi } from '@/lib/api';
 import { getSocket, SOCKET_EVENTS } from '@/lib/socket';
 import { GAME_RULES, Match, MatchPlayer, MAX_PLAYERS_PER_LEVEL, GameLevel } from '@integrame/shared';
 import { SAMPLE_INTEGRAMA } from '@/lib/puzzles';
@@ -55,16 +55,25 @@ function GamePlayPageInner({ params }: PageProps) {
   const [lastReaction, setLastReaction] = useState<{ userId: string; emoji: string; fromMe: boolean } | null>(null);
   const [latestMetrics, setLatestMetrics] = useState<Record<string, unknown> | undefined>(undefined);
   const [mazeSeed, setMazeSeed] = useState<number | undefined>(undefined);
+  const staticRules = GAME_RULES[canonicalGameType] || GAME_RULES['integrame'];
+  const [serverTimeLimit, setServerTimeLimit] = useState<number>(staticRules.timeLimit);
+
+  // Fetch timeLimit din admin (suprascrie valoarea hardcoded din shared)
+  useEffect(() => {
+    gamesApi.getRules(canonicalGameType)
+      .then((r) => setServerTimeLimit(r.data.timeLimit))
+      .catch(() => {});
+  }, [canonicalGameType]);
 
   const puzzle: CrosswordPuzzle = aiPuzzle || SAMPLE_INTEGRAMA;
-  const rules = GAME_RULES[canonicalGameType] || GAME_RULES['integrame'];
+  const rules = { ...staticRules, timeLimit: serverTimeLimit };
   // Calculeaza timpurile ramas corect dupa refresh, pe baza match.startedAt de pe server
   const initialGameSeconds = useMemo(() => {
-    if (!started || !match?.startedAt) return rules.timeLimit;
+    if (!started || !match?.startedAt) return serverTimeLimit;
     const elapsed = Math.floor((Date.now() - new Date(match.startedAt).getTime()) / 1000);
-    return Math.max(0, rules.timeLimit - elapsed);
+    return Math.max(0, serverTimeLimit - elapsed);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, match?.startedAt]);
+  }, [started, match?.startedAt, serverTimeLimit]);
 
   useEffect(() => {
     if (!_hasHydrated) return;

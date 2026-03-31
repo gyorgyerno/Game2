@@ -544,10 +544,14 @@ export default function DashboardPage() {
 
               <div className="rounded-2xl border border-amber-300/30 bg-amber-300/10 px-3.5 py-4 flex flex-col items-center justify-center">
                 <span className="text-[11px] uppercase tracking-wide text-amber-200/90 font-semibold mb-2">Cu AI</span>
-                <span className="text-[15px] text-amber-100/85 mb-2 text-center">Mai întâi alegi tema, apoi pornești jocul.</span>
+                <span className="text-[15px] text-amber-100/85 mb-2 text-center">
+                  {selectedGame === 'integrame'
+                    ? 'Mai întâi alegi tema, apoi pornești jocul.'
+                    : 'Joacă împotriva unui bot AI.'}
+                </span>
                 <button
                   onClick={() => {
-                    if (!showAiThemes) {
+                    if (selectedGame === 'integrame' && !showAiThemes) {
                       setShowAiThemes(true);
                       return;
                     }
@@ -558,10 +562,10 @@ export default function DashboardPage() {
                 >
                   {aiLoading
                     ? <><span className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" /> Se generează...</>
-                    : <>{showAiThemes ? '🚀 Pornește jocul' : '🎲 Generează joc'}</>}
+                    : <>{selectedGame === 'integrame' && showAiThemes ? '🚀 Pornește jocul' : '🚀 Pornește jocul'}</>}
                 </button>
 
-                {showAiThemes && (
+                {selectedGame === 'integrame' && showAiThemes && (
                   <div className="mt-3 w-full rounded-xl border border-amber-200/20 bg-black/10 p-2">
                     <span className="text-[15px] text-amber-100/90 font-semibold">🎯 Alege o temă:</span>
                     <div className="mt-2 flex flex-wrap justify-center gap-1.5">
@@ -694,7 +698,7 @@ export default function DashboardPage() {
                       <Star
                         key={gi}
                         size={12}
-                        className={isCompleted(lvl, gi) ? 'text-yellow-500 fill-yellow-500' : 'text-slate-400'}
+                        className={soloDashMounted && isCompleted(lvl, gi) ? 'text-yellow-500 fill-yellow-500' : 'text-slate-400'}
                       />
                     ))}
                   </div>
