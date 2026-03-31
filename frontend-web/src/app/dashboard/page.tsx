@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Trophy, Play, ChevronDown, BookOpen, Star, Link2, Copy, Check, X, Lock } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
-import { matchesApi, invitesApi, statsApi, api } from '@/lib/api';
+import { matchesApi, invitesApi, statsApi, api, contestsApi } from '@/lib/api';
 import { Match, UserGameStats } from '@integrame/shared';
 import Navbar from '@/components/Navbar';
 import { hydrateIntegrameProgressFromServer, isCompleted, isUnlocked } from '@/store/gameProgress';
@@ -54,6 +54,8 @@ export default function DashboardPage() {
   const [levelUnlockConfig, setLevelUnlockConfig] = useState<Record<number, number>>({});
   const [integrameSoloLevels, setIntegrameSoloLevels] = useState<PublicLevelConfig[]>([]); 
   const [soloDashMounted, setSoloDashMounted] = useState(false);
+  const [activeContests, setActiveContests] = useState<any[]>([]);
+  const [joiningContest, setJoiningContest] = useState<string | null>(null);
 
   const AI_THEME_LABELS: Record<string, string> = {
     general: '🎲 General',
@@ -73,6 +75,7 @@ export default function DashboardPage() {
     fetchMe();
     matchesApi.getHistory().then((r) => setRecentMatches(r.data)).catch(() => {});
     statsApi.getMyStats().then((r) => setStats(r.data)).catch(() => {});
+    contestsApi.list().then((r) => setActiveContests(r.data.contests ?? [])).catch(() => {});
   }, [_hasHydrated, token]);
 
   useEffect(() => {
@@ -368,6 +371,98 @@ export default function DashboardPage() {
       <Navbar />
       <main className="relative overflow-hidden max-w-[1700px] mx-auto px-3 md:px-8 py-8 md:py-10">
         <div className="space-y-8">
+
+        {/* Concursuri active / viitoare */}
+        {activeContests.length > 0 && (
+          <div className="space-y-3">
+            {activeContests.map((c) => {
+              const isLive = c.status === 'live';
+              const startDate = new Date(c.startAt).toLocaleString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+              const endDate = new Date(c.endAt).toLocaleString('ro-RO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+              return (
+                <div
+                  key={c.id}
+                  className={`rounded-[28px] border backdrop-blur-xl shadow-lg flex flex-col md:flex-row md:items-center gap-4 p-5 md:p-6 ${
+                    isLive
+                      ? 'border-red-500/40 bg-red-950/30'
+                      : 'border-yellow-500/30 bg-yellow-950/20'
+                  }`}
+                >
+                  {/* Icon + info */}
+                  <div className="flex items-start gap-4 flex-1 min-w-0">
+                    <div className={`text-3xl flex-shrink-0 mt-0.5 ${ isLive ? 'animate-pulse' : ''}`}>
+                      {isLive ? '🔴' : '🏆'}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                          isLive ? 'bg-red-600 text-white' : 'bg-yellow-600/80 text-yellow-100'
+                        }`}>
+                          {isLive ? '● LIVE' : '⏳ În așteptare'}
+                        </span>
+                        <h3 className="text-white font-bold text-base md:text-lg truncate">{c.name}</h3>
+                      </div>
+                      {c.description && (
+                        <p className="text-slate-300/70 text-sm mt-0.5 line-clamp-1">{c.description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5 text-xs text-slate-400">
+                        <span>🕒 {isLive ? `Până la ${endDate}` : `Start: ${startDate}`}</span>
+                        <span>👥 {c.registeredCount}{c.maxPlayers ? `/${c.maxPlayers}` : ''} înscriși</span>
+                        {c.rounds.length > 0 && (
+                          <span>🎯 {c.rounds.length} rondă{c.rounds.length > 1 ? 'e' : ''}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actiuni */}
+                  <div className="flex-shrink-0 flex gap-2 items-center">
+                    {c.isRegistered ? (
+                      <Link
+                        href={`/contest/${c.slug}`}
+                        className={`px-5 py-2.5 rounded-full font-bold text-sm transition-colors ${
+                          isLive
+                            ? 'bg-red-600 hover:bg-red-500 text-white'
+                            : 'bg-yellow-600 hover:bg-yellow-500 text-white'
+                        }`}
+                      >
+                        {isLive ? '▶ Joacă acum' : '✅ Înscris — Vezi detalii'}
+                      </Link>
+                    ) : c.isFull ? (
+                      <span className="px-5 py-2.5 rounded-full font-bold text-sm bg-gray-700 text-gray-400 cursor-not-allowed">
+                        Plin
+                      </span>
+                    ) : (
+                      <button
+                        disabled={joiningContest === c.slug}
+                        onClick={async () => {
+                          setJoiningContest(c.slug);
+                          try {
+                            await contestsApi.join(c.slug);
+                            setActiveContests(prev => prev.map(x =>
+                              x.slug === c.slug ? { ...x, isRegistered: true, registeredCount: x.registeredCount + 1 } : x
+                            ));
+                          } catch { /* ignore */ } finally {
+                            setJoiningContest(null);
+                          }
+                        }}
+                        className="px-5 py-2.5 rounded-full font-bold text-sm bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white transition-colors"
+                      >
+                        {joiningContest === c.slug ? 'Se procesează...' : '🏆 Înscrie-te'}
+                      </button>
+                    )}
+                    <Link
+                      href={`/contest/${c.slug}`}
+                      className="px-3 py-2.5 rounded-full text-sm bg-white/10 hover:bg-white/20 text-white transition-colors"
+                    >
+                      Detalii
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Play CTA */}
         <div className={`${glassCard} p-5 md:p-6`}>

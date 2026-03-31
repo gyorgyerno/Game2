@@ -149,6 +149,7 @@ export const gamesApi = {
 
 // ─── Contests ─────────────────────────────────────────────────────────────────
 export const contestsApi = {
+  list:         () => api.get('/contests'),
   get:          (slug: string) => api.get(`/contests/${slug}`),
   join:         (slug: string) => api.post(`/contests/${slug}/join`, {}),
   leaderboard:  (slug: string, limit?: number) => api.get(`/contests/${slug}/leaderboard`, { params: { limit } }),

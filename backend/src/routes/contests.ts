@@ -31,6 +31,58 @@ import { contestEngine } from '../services/ContestEngine';
 
 const router = Router();
 
+// ─── GET /api/contests — lista publică concursuri active/viitoare ─────────────
+router.get('/', asyncHandler(async (req: Request, res: Response) => {
+  const userId = extractOptionalUserId(req);
+
+  const contests = await prisma.contest.findMany({
+    where: {
+      status: { in: ['waiting', 'live'] },
+      type: 'public',
+    },
+    include: {
+      rounds: { orderBy: { order: 'asc' } },
+      _count: { select: { players: true } },
+    },
+    orderBy: { startAt: 'asc' },
+    take: 10,
+  });
+
+  const result = await Promise.all(contests.map(async (c) => {
+    let isRegistered = false;
+    if (userId) {
+      const player = await prisma.contestPlayer.findFirst({
+        where: { contestId: c.id, userId },
+        select: { id: true },
+      });
+      isRegistered = !!player;
+    }
+    return {
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      description: c.description,
+      status: c.status,
+      startAt: c.startAt,
+      endAt: c.endAt,
+      maxPlayers: c.maxPlayers,
+      registeredCount: c._count.players,
+      rounds: c.rounds.map(r => ({
+        id: r.id,
+        order: r.order,
+        label: r.label,
+        gameType: r.gameType,
+        minLevel: r.minLevel,
+        matchesCount: r.matchesCount,
+      })),
+      isRegistered,
+      isFull: c.maxPlayers !== null && c._count.players >= c.maxPlayers,
+    };
+  }));
+
+  res.json({ contests: result });
+}));
+
 // ─── GET /api/contests/:slug ──────────────────────────────────────────────────
 // Detalii concurs + statusul utilizatorului curent (dacă e autentificat)
 router.get('/:slug', asyncHandler(async (req: Request, res: Response) => {
