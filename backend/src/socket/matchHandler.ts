@@ -565,8 +565,25 @@ async function handlePlayerLeft(io: SocketServer, userId: string, matchId: strin
     include: { players: { include: { user: true } } },
   });
 
+  if (!match) return;
+
+  // ─── Caz special: userul a plecat inainte sa inceapa jocul (match in asteptare) ──
+  if (match.status === 'waiting') {
+    logger.info('Jucator a abandonat meciul in asteptare', { userId, matchId });
+    const now = new Date();
+    await prisma.matchPlayer.updateMany({
+      where: { matchId, userId },
+      data: { score: 0, finishedAt: now },
+    });
+    await prisma.match.update({
+      where: { id: matchId },
+      data: { status: 'abandoned', finishedAt: now },
+    });
+    return;
+  }
+
   // Actionam doar daca meciul e activ sau in countdown
-  if (!match || (match.status !== 'active' && match.status !== 'countdown')) return;
+  if (match.status !== 'active' && match.status !== 'countdown') return;
 
   const room = `match:${matchId}`;
   logger.info('Jucator a parasit meciul activ', { userId, matchId, status: match.status });

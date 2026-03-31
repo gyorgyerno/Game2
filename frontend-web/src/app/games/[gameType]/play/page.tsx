@@ -121,6 +121,7 @@ function GamePlayPageInner({ params }: PageProps) {
       }
       setMatch(m);
       if (m?.status === 'active') { setStarted(true); }
+      if (m?.status === 'abandoned') { router.replace(`/games/${gameType}`); return; }
     }).catch(() => {});
 
     const socket = getSocket();
@@ -138,6 +139,9 @@ function GamePlayPageInner({ params }: PageProps) {
       if (m.status === 'countdown') { setCountdown(3); }
       if (m.status === 'finished') {
         setTimeout(() => router.push(`/games/${gameType}/result?matchId=${matchId}`), 500);
+      }
+      if (m.status === 'abandoned') {
+        router.replace(`/games/${gameType}`);
       }
     });
     socket.on(SOCKET_EVENTS.MATCH_COUNTDOWN, ({ countdown: c }: { countdown: number }) => setCountdown(c));
@@ -187,6 +191,9 @@ function GamePlayPageInner({ params }: PageProps) {
         } else if (m.status === 'finished') {
           heartbeatActive = false;
           setTimeout(() => router.push(`/games/${gameType}/result?matchId=${matchId}`), 500);
+        } else if (m.status === 'abandoned') {
+          heartbeatActive = false;
+          router.replace(`/games/${gameType}`);
         }
       } catch { /* ignore */ }
     }, 2000);

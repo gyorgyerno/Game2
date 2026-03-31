@@ -93,7 +93,7 @@ export const GAME_RULES: Record<GameType, GameRules> = {
 };
 
 // ─── Match ────────────────────────────────────────────────────────────────────
-export type MatchStatus = 'waiting' | 'countdown' | 'active' | 'finished';
+export type MatchStatus = 'waiting' | 'countdown' | 'active' | 'finished' | 'abandoned';
 
 export interface Match {
   id: string;

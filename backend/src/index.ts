@@ -149,6 +149,25 @@ server.listen(config.port, async () => {
   } catch (err) {
     logger.error('❌ ContestEngine start eșuat', { err });
   }
+
+  // Cleanup matches blocate în 'waiting' de mai mult de 15 minute (ex: browser închis în lobby)
+  const cleanupStaleWaitingMatches = async () => {
+    try {
+      const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+      const result = await prisma.match.updateMany({
+        where: { status: 'waiting', createdAt: { lt: cutoff } },
+        data: { status: 'abandoned', finishedAt: new Date() },
+      });
+      if (result.count > 0) {
+        logger.info(`🧹 Cleanup: ${result.count} match(uri) 'waiting' stale marcate 'abandoned'`);
+      }
+    } catch (err) {
+      logger.error('❌ Cleanup stale waiting matches eșuat', { err });
+    }
+  };
+  // Rulează la startup și apoi la fiecare 10 minute
+  cleanupStaleWaitingMatches();
+  setInterval(cleanupStaleWaitingMatches, 10 * 60 * 1000);
 });
 
 export default app;

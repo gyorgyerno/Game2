@@ -71,7 +71,7 @@ model Match {
   id          String      @id @default(uuid())
   gameType    String
   level       Int         @default(1)
-  status      String      @default("waiting") // waiting|countdown|active|finished
+  status      String      @default("waiting") // waiting|countdown|active|finished|abandoned
   isAI        Boolean     @default(false)
   startedAt   DateTime?
   finishedAt  DateTime?

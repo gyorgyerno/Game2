@@ -140,7 +140,7 @@ router.get('/:id', requireAuth, async (req: AuthRequest & import('express').Requ
 // GET /api/matches/history/me
 router.get('/history/me', requireAuth, async (req: AuthRequest, res: Response) => {
   const matches = await prisma.matchPlayer.findMany({
-    where: { userId: req.userId },
+    where: { userId: req.userId, match: { status: { in: ['finished', 'active', 'countdown'] } } },
     include: { match: { include: { players: { include: { user: true } } } } },
     orderBy: { match: { createdAt: 'desc' } },
     take: 20,
