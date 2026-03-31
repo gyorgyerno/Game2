@@ -9,7 +9,7 @@ import { config } from './config';
 import logger from './logger';
 import { requestLogger } from './middleware/requestLogger';
 import { globalErrorHandler } from './middleware/errorHandler';
-import { initSocket } from './socket';
+import { initSocket, io } from './socket';
 import authRoutes from './routes/auth';
 import matchRoutes from './routes/matches';
 import leaderboardRoutes from './routes/leaderboard';
@@ -21,6 +21,7 @@ import adminRoutes from './routes/admin';
 import aiRoutes from './routes/ai';
 import friendRoutes from './routes/friends';
 import gamesRoutes from './routes/games';
+import contestsRoutes from './routes/contests';
 import prisma from './prisma';
 import { activityFeedGenerator } from './services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from './services/simulatedPlayers/BotChatGenerator';
@@ -28,6 +29,7 @@ import { runtimeMetricsMonitor } from './services/simulatedPlayers/RuntimeMetric
 import { gameRegistry } from './games/GameRegistry';
 import { systemConfigService } from './services/SystemConfigService';
 import { gameLevelConfigService } from './services/GameLevelConfigService';
+import { contestEngine } from './services/ContestEngine';
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +63,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/friends', friendRoutes);
 app.use('/api/games', gamesRoutes);
+app.use('/api/contests', contestsRoutes);
 
 app.get('/health', (_req: import('express').Request, res: import('express').Response) =>
   res.json({ status: 'ok', ts: new Date() })
@@ -137,6 +140,14 @@ server.listen(config.port, async () => {
     logger.info('✅ Game level configs încărcate din DB');
   } catch (err) {
     logger.error('❌ Game level configs load eșuat', { err });
+  }
+
+  // Pornește ContestEngine (tranziții automate de status + real-time)
+  try {
+    contestEngine.start(prisma, io);
+    logger.info('✅ ContestEngine pornit');
+  } catch (err) {
+    logger.error('❌ ContestEngine start eșuat', { err });
   }
 });
 

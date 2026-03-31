@@ -9,6 +9,7 @@ import { systemConfigService } from '../services/SystemConfigService';
 import { config } from '../config';
 import { startBotGameplaySimulation } from '../services/simulatedPlayers/BotGameplaySimulator';
 import { evaluateChallengesForUser } from '../services/BonusChallengeService';
+import { contestEngine } from '../services/ContestEngine';
 
 const countdownTimers: Record<string, ReturnType<typeof setInterval>> = {};
 const matchTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -881,6 +882,22 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string, fo
     await captureGhostRuns(final);
 
     io.to(room).emit(SOCKET_EVENTS.MATCH_FINISHED, final);
+
+    // ── ContestEngine hook (non-blocking, nu afectează meciul) ────────────────
+    if (final) {
+      const realFinished = final.players.filter(
+        (p: { user: { userType: string }; finishedAt: Date | null; score: number }) =>
+          p.user.userType === 'REAL' && p.finishedAt != null
+      );
+      for (const rp of realFinished) {
+        const timeTaken = match.startedAt && rp.finishedAt
+          ? Math.round((new Date(rp.finishedAt).getTime() - new Date(match.startedAt).getTime()) / 1000)
+          : undefined;
+        contestEngine
+          .processMatchResult(matchId, match.gameType, rp.userId, rp.score, match.level ?? 1, timeTaken)
+          .catch((err) => logger.warn('[ContestEngine] hook error', { matchId, userId: rp.userId, err: String(err) }));
+      }
+    }
   } catch (err) {
     logger.error('finalizeMatch error', { matchId, err });
   }

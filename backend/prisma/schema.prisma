@@ -402,3 +402,88 @@ model BannedIP {
 
   @@map("banned_ips")
 }
+
+// ─── Contest ──────────────────────────────────────────────────────────────────
+// Un concurs/turneu care poate conține unul sau mai multe jocuri.
+// status: waiting (pre-înregistrare) → live (activ, scoruri valide) → ended (final)
+model Contest {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String    @default("")
+  type        String    @default("public")  // public | private
+  status      String    @default("waiting") // waiting | live | ended
+  startAt     DateTime
+  endAt       DateTime
+  maxPlayers  Int?      // null = nelimitat
+  createdBy   String    @default("admin")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  players     ContestPlayer[]
+  rounds      ContestRound[]
+  scores      ContestScore[]
+
+  @@index([status])
+  @@index([slug])
+  @@map("contests")
+}
+
+// ─── ContestPlayer ────────────────────────────────────────────────────────────
+// Înregistrarea unui utilizator la un concurs.
+model ContestPlayer {
+  id         String   @id @default(cuid())
+  contestId  String
+  userId     String
+  joinedAt   DateTime @default(now())
+
+  contest    Contest  @relation(fields: [contestId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, userId])
+  @@index([contestId])
+  @@index([userId])
+  @@map("contest_players")
+}
+
+// ─── ContestRound ─────────────────────────────────────────────────────────────
+// O rundă/etapă dintr-un concurs. Fiecare rundă are un joc, nivel minim și
+// număr de meciuri care contează (cele mai bune N).
+model ContestRound {
+  id           String  @id @default(cuid())
+  contestId    String
+  order        Int     // 1, 2, 3... — ordinea afișată
+  label        String  // ex: "Joc 1", "Runda Finală"
+  gameType     String  // integrame | labirinturi | slogane
+  minLevel     Int     @default(1)  // nivel minim acceptat (1-5)
+  matchesCount Int     @default(1)  // cele mai bune N meciuri contează
+
+  contest      Contest        @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  scores       ContestScore[]
+
+  @@unique([contestId, order])
+  @@index([contestId])
+  @@map("contest_rounds")
+}
+
+// ─── ContestScore ─────────────────────────────────────────────────────────────
+// Scorul unui jucător pentru o rundă specifică dintr-un concurs.
+// Se păstrează TOATE scorurile; cele mai bune N se iau la query (per rundă).
+model ContestScore {
+  id         String        @id @default(cuid())
+  contestId  String
+  roundId    String        // runda căreia îi aparține scorul
+  userId     String
+  gameType   String
+  matchId    String?       // referință opțională la meciul sursă
+  score      Int
+  level      Int           @default(1) // nivelul la care s-a jucat
+  timeTaken  Int?          // secunde
+  createdAt  DateTime      @default(now())
+
+  contest    Contest      @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  round      ContestRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@index([contestId, userId])
+  @@index([contestId, roundId])
+  @@map("contest_scores")
+}

@@ -146,3 +146,11 @@ export const gamesApi = {
   getAll:       ()             => api.get('/games'),
   getRules:     (gameType: string) => api.get<{ timeLimit: number; pointsPerCorrect: number; pointsPerMistake: number; bonusCompletion: number; bonusFirstFinisher: number; forfeitBonus: number }>(`/games/rules/${gameType}`),
 };
+
+// ─── Contests ─────────────────────────────────────────────────────────────────
+export const contestsApi = {
+  get:          (slug: string) => api.get(`/contests/${slug}`),
+  join:         (slug: string) => api.post(`/contests/${slug}/join`, {}),
+  leaderboard:  (slug: string, limit?: number) => api.get(`/contests/${slug}/leaderboard`, { params: { limit } }),
+  players:      (slug: string) => api.get(`/contests/${slug}/players`),
+};

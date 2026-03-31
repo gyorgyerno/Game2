@@ -12,6 +12,7 @@ const NAV = [
   { href: '/admin/ghost-runs', label: 'Ghost Runs', icon: '👻' },
   { href: '/admin/users', label: 'Utilizatori', icon: '👥' },
   { href: '/admin/matches', label: 'Meciuri', icon: '🎮' },
+  { href: '/admin/contests', label: 'Concursuri', icon: '🏆' },
   { href: '/admin/invites', label: 'Invite Codes', icon: '🎫' },
   { href: '/admin/logs', label: 'Loguri', icon: '📋' },
   { href: '/admin/settings', label: 'Settings', icon: '⚙️' },

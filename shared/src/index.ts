@@ -274,3 +274,61 @@ export interface EloHistoryEntry {
   date: string;
   rating: number;
 }
+
+// ─── Contest ──────────────────────────────────────────────────────────────────
+export type ContestStatus = 'waiting' | 'live' | 'ended';
+export type ContestType = 'public' | 'private';
+
+export interface ContestRoundPublic {
+  id: string;
+  order: number;
+  label: string;
+  gameType: string;
+  minLevel: number;
+  matchesCount: number;
+}
+
+export interface ContestPublic {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  type: ContestType;
+  status: ContestStatus;
+  startAt: string;
+  endAt: string;
+  maxPlayers: number | null;
+  registeredCount: number;
+  onlineCount: number;
+  rounds: ContestRoundPublic[];
+  isRegistered: boolean;
+  isFull: boolean;
+}
+
+export interface ContestRoundScore {
+  roundId: string;
+  order: number;
+  label: string;
+  gameType: string;
+  minLevel: number;
+  matchesCount: number;
+  score: number;
+}
+
+export interface ContestLeaderboardEntry {
+  rank: number;
+  userId: string;
+  username: string;
+  avatarUrl: string | null;
+  totalScore: number;
+  rounds: ContestRoundScore[];
+  matchesPlayed: number;
+  joinedAt: string;
+}
+
+// Socket events pentru concursuri (Client ↔ Server)
+export interface ContestRoomJoin { contestId: string; }
+export interface ContestRoomLeave { contestId: string; }
+export interface ContestStatusChange { contestId: string; status: ContestStatus; }
+export interface ContestLeaderboardUpdate { contestId: string; leaderboard: ContestLeaderboardEntry[]; }
+export interface ContestPlayersUpdate { contestId: string; onlinePlayers: string[]; }

@@ -15,6 +15,7 @@ import { activityFeedGenerator } from '../services/simulatedPlayers/ActivityFeed
 import { botChatGenerator } from '../services/simulatedPlayers/BotChatGenerator';
 import { runtimeMetricsMonitor } from '../services/simulatedPlayers/RuntimeMetricsMonitor';
 import { CHALLENGE_TYPE_DEFS, challengeDescription, ChallengeType } from '../services/BonusChallengeService';
+import { contestEngine } from '../services/ContestEngine';
 
 const router = Router();
 
@@ -1876,6 +1877,326 @@ router.delete('/bonus-challenges/:id', adminAuth, asyncHandler(async (req: Reque
   await prisma.bonusChallenge.delete({ where: { id } });
   logger.info('[ADMIN] BonusChallenge deleted', { id, admin: reqA.adminUsername });
   res.json({ ok: true });
+}));
+
+// ─── CONTESTS ADMIN ───────────────────────────────────────────────────────────
+
+// GET /api/admin/contests — lista tuturor concursurilor cu stats
+router.get('/contests', adminAuth, asyncHandler(async (_req: Request, res: Response) => {
+  const contests = await prisma.contest.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: {
+      rounds: { orderBy: { order: 'asc' } },
+      _count: { select: { players: true } },
+    },
+  });
+
+  const result = contests.map(c => ({
+    id: c.id,
+    name: c.name,
+    slug: c.slug,
+    description: c.description,
+    type: c.type,
+    status: c.status,
+    startAt: c.startAt.toISOString(),
+    endAt: c.endAt.toISOString(),
+    maxPlayers: c.maxPlayers,
+    createdBy: c.createdBy,
+    createdAt: c.createdAt.toISOString(),
+    registeredCount: c._count.players,
+    onlineCount: contestEngine.getOnlinePlayers(c.id).length,
+    rounds: c.rounds.map(r => ({ id: r.id, order: r.order, label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
+  }));
+
+  res.json({ contests: result });
+}));
+
+// POST /api/admin/contests — creare concurs nou
+router.post('/contests', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  interface RoundInput { order: number; label: string; gameType: string; minLevel: number; matchesCount: number; }
+  const { name, slug, description, type, startAt, endAt, maxPlayers, rounds } = req.body as {
+    name: string;
+    slug: string;
+    description?: string;
+    type?: string;
+    startAt: string;
+    endAt: string;
+    maxPlayers?: number | null;
+    rounds: RoundInput[];
+  };
+
+  if (!name || !slug || !startAt || !endAt || !Array.isArray(rounds) || rounds.length === 0) {
+    res.status(400).json({ error: 'name, slug, startAt, endAt, rounds sunt obligatorii' });
+    return;
+  }
+
+  if (new Date(endAt) <= new Date(startAt)) {
+    res.status(400).json({ error: 'endAt trebuie să fie după startAt' });
+    return;
+  }
+
+  // Verifică slug unic
+  const existing = await prisma.contest.findUnique({ where: { slug } });
+  if (existing) {
+    res.status(409).json({ error: 'Slug-ul este deja folosit' });
+    return;
+  }
+
+  const contest = await prisma.contest.create({
+    data: {
+      name,
+      slug: slug.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      description: description ?? '',
+      type: type ?? 'public',
+      status: 'waiting',
+      startAt: new Date(startAt),
+      endAt: new Date(endAt),
+      maxPlayers: maxPlayers ?? null,
+      createdBy: reqA.adminUsername ?? 'admin',
+      rounds: {
+        create: rounds.map((r: RoundInput) => ({
+          order: r.order,
+          label: r.label,
+          gameType: r.gameType,
+          minLevel: r.minLevel ?? 1,
+          matchesCount: r.matchesCount ?? 1,
+        })),
+      },
+    },
+    include: {
+      rounds: { orderBy: { order: 'asc' } },
+      _count: { select: { players: true } },
+    },
+  });
+
+  logger.info('[ADMIN] Contest creat', { id: contest.id, slug: contest.slug, admin: reqA.adminUsername });
+  res.status(201).json({
+    ...contest,
+    rounds: contest.rounds.map(r => ({ id: r.id, order: r.order, label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
+    registeredCount: 0,
+    onlineCount: 0,
+  });
+}));
+
+// PATCH /api/admin/contests/:id — editare concurs
+router.patch('/contests/:id', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  const { id } = req.params;
+  interface RoundInput { order: number; label: string; gameType: string; minLevel: number; matchesCount: number; }
+  const { name, description, type, startAt, endAt, maxPlayers, rounds } = req.body as {
+    name?: string;
+    description?: string;
+    type?: string;
+    startAt?: string;
+    endAt?: string;
+    maxPlayers?: number | null;
+    rounds?: RoundInput[];
+  };
+
+  const contest = await prisma.contest.findUnique({ where: { id } });
+  if (!contest) {
+    res.status(404).json({ error: 'Concursul nu a fost găsit' });
+    return;
+  }
+
+  // Update câmpuri de bază
+  const updated = await prisma.contest.update({
+    where: { id },
+    data: {
+      ...(name && { name }),
+      ...(description !== undefined && { description }),
+      ...(type && { type }),
+      ...(startAt && { startAt: new Date(startAt) }),
+      ...(endAt && { endAt: new Date(endAt) }),
+      ...(maxPlayers !== undefined && { maxPlayers: maxPlayers ?? null }),
+    },
+    include: {
+      rounds: { orderBy: { order: 'asc' } },
+      _count: { select: { players: true } },
+    },
+  });
+
+  // Update rounds dacă sunt trimise
+  if (Array.isArray(rounds)) {
+    await prisma.contestRound.deleteMany({ where: { contestId: id } });
+    for (const r of rounds) {
+      await prisma.contestRound.create({ data: { contestId: id, order: r.order, label: r.label, gameType: r.gameType, minLevel: r.minLevel ?? 1, matchesCount: r.matchesCount ?? 1 } });
+    }
+  }
+
+  const finalRounds = Array.isArray(rounds)
+    ? rounds
+    : updated.rounds.map(r => ({ id: r.id, order: r.order, label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount }));
+
+  logger.info('[ADMIN] Contest actualizat', { id, admin: reqA.adminUsername });
+  res.json({
+    ...updated,
+    rounds: finalRounds,
+    registeredCount: updated._count.players,
+    onlineCount: contestEngine.getOnlinePlayers(id).length,
+  });
+}));
+
+// DELETE /api/admin/contests/:id — ștergere concurs (cascade pe players/games/scores)
+router.delete('/contests/:id', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  const { id } = req.params;
+
+  await prisma.contest.delete({ where: { id } });
+  logger.info('[ADMIN] Contest șters', { id, admin: reqA.adminUsername });
+  res.json({ ok: true });
+}));
+
+// POST /api/admin/contests/:id/force-start — pornire forțată
+router.post('/contests/:id/force-start', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  const { id } = req.params;
+
+  const contest = await prisma.contest.findUnique({ where: { id } });
+  if (!contest) {
+    res.status(404).json({ error: 'Concursul nu a fost găsit' });
+    return;
+  }
+  if (contest.status === 'ended') {
+    res.status(400).json({ error: 'Concursul s-a terminat deja' });
+    return;
+  }
+
+  await contestEngine.forceStart(id);
+  logger.info('[ADMIN] Contest force-start', { id, admin: reqA.adminUsername });
+  res.json({ ok: true, status: 'live' });
+}));
+
+// POST /api/admin/contests/:id/force-end — oprire forțată
+router.post('/contests/:id/force-end', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const reqA = req as AdminRequest;
+  const { id } = req.params;
+
+  const contest = await prisma.contest.findUnique({ where: { id } });
+  if (!contest) {
+    res.status(404).json({ error: 'Concursul nu a fost găsit' });
+    return;
+  }
+
+  await contestEngine.forceEnd(id);
+  logger.info('[ADMIN] Contest force-end', { id, admin: reqA.adminUsername });
+  res.json({ ok: true, status: 'ended' });
+}));
+
+// GET /api/admin/contests/:id/players — lista participanților cu scoruri complete
+router.get('/contests/:id/players', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  const contest = await prisma.contest.findUnique({
+    where: { id },
+    include: {
+      rounds: { orderBy: { order: 'asc' } },
+      _count: { select: { players: true } },
+    },
+  });
+  if (!contest) {
+    res.status(404).json({ error: 'Concursul nu a fost găsit' });
+    return;
+  }
+
+  const players = await prisma.contestPlayer.findMany({
+    where: { contestId: id },
+    orderBy: { joinedAt: 'asc' },
+  });
+
+  const scores = await prisma.contestScore.findMany({
+    where: { contestId: id },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const userIds = players.map(p => p.userId);
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, username: true, avatarUrl: true, league: true, rating: true, xp: true, email: true },
+  });
+  const userMap = new Map(users.map(u => [u.id, u]));
+  const onlineSet = new Set(contestEngine.getOnlinePlayers(id));
+
+  // Best scores per (userId, roundId) — top matchesCount per round
+  const scoresByRoundUser: Record<string, Record<string, number[]>> = {};
+  const allScoresPerUser: Record<string, typeof scores> = {};
+  for (const s of scores) {
+    if (!allScoresPerUser[s.userId]) allScoresPerUser[s.userId] = [];
+    allScoresPerUser[s.userId].push(s);
+    if (s.roundId) {
+      if (!scoresByRoundUser[s.roundId]) scoresByRoundUser[s.roundId] = {};
+      if (!scoresByRoundUser[s.roundId][s.userId]) scoresByRoundUser[s.roundId][s.userId] = [];
+      scoresByRoundUser[s.roundId][s.userId].push(s.score);
+    }
+  }
+
+  const result = players.map(p => {
+    const u = userMap.get(p.userId);
+    let totalScore = 0;
+    const roundScores: Record<string, number> = {};
+    for (const round of contest.rounds) {
+      const userRoundScores = (scoresByRoundUser[round.id]?.[p.userId] ?? []).sort((a, b) => b - a);
+      const best = userRoundScores.slice(0, round.matchesCount).reduce((a, b) => a + b, 0);
+      roundScores[round.id] = best;
+      totalScore += best;
+    }
+    const allScores = allScoresPerUser[p.userId] ?? [];
+    return {
+      userId: p.userId,
+      username: u?.username ?? 'Unknown',
+      email: u?.email ?? '',
+      avatarUrl: u?.avatarUrl ?? null,
+      league: u?.league ?? 'bronze',
+      rating: u?.rating ?? 1000,
+      xp: u?.xp ?? 0,
+      joinedAt: p.joinedAt.toISOString(),
+      isOnline: onlineSet.has(p.userId),
+      totalScore,
+      roundScores,
+      matchesPlayed: allScores.length,
+      scoreHistory: allScores.map(s => ({
+        roundId: s.roundId,
+        gameType: s.gameType,
+        score: s.score,
+        level: s.level,
+        timeTaken: s.timeTaken,
+        matchId: s.matchId,
+        createdAt: s.createdAt.toISOString(),
+      })),
+    };
+  });
+
+  // Sortăm după totalScore desc pentru ranking
+  result.sort((a, b) => b.totalScore - a.totalScore);
+  const withRank = result.map((p, i) => ({ ...p, rank: i + 1 }));
+
+  res.json({
+    contest: {
+      id: contest.id,
+      name: contest.name,
+      slug: contest.slug,
+      status: contest.status,
+      startAt: contest.startAt.toISOString(),
+      endAt: contest.endAt.toISOString(),
+      maxPlayers: contest.maxPlayers,
+      rounds: contest.rounds.map(r => ({ id: r.id, order: r.order, label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
+    },
+    totalRegistered: contest._count.players,
+    onlineCount: onlineSet.size,
+    players: withRank,
+  });
+}));
+
+// GET /api/admin/contests/:id/stats — stats sintetice (pentru cardul din admin)
+router.get('/contests/:id/stats', adminAuth, asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const stats = await contestEngine.getContestStats(id);
+  if (!stats) {
+    res.status(404).json({ error: 'Concursul nu a fost găsit' });
+    return;
+  }
+  res.json(stats);
 }));
 
 export default router;
