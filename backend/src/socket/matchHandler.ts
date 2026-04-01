@@ -49,6 +49,12 @@ function isMazeGame(gameType: string): boolean {
   return gameType === 'maze' || gameType === 'labirinturi';
 }
 
+/** Canonicalizează gameType-ul la forma folosită în DB (ex: 'labirinturi' → 'maze') */
+function normalizeGameType(gameType: string): string {
+  if (gameType === 'labirinturi') return 'maze';
+  return gameType;
+}
+
 /** Hash deterministă din matchId → seed uint32.
  *  Același matchId produce mereu același seed → ambii jucători generează același labirint. */
 function mazeSeedFromMatchId(matchId: string): number {
@@ -561,7 +567,9 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
 // ─── Penalizare abandon: deduce XP + auto-block dacă prea multe abandon-uri ──
 async function applyAbandonPenalty(userId: string, gameType: string, level: number, isAI: boolean): Promise<void> {
   const abandonCfg = systemConfigService.getAbandon();
-  if (!abandonCfg.enabledGameTypes?.includes(gameType)) return;
+  const normalizedType = normalizeGameType(gameType);
+  const normalizedEnabled = (abandonCfg.enabledGameTypes ?? []).map(normalizeGameType);
+  if (!normalizedEnabled.includes(normalizedType)) return;
 
   // Nu penalizăm userii SIMULATED / GHOST
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { userType: true, xp: true } });
@@ -583,7 +591,7 @@ async function applyAbandonPenalty(userId: string, gameType: string, level: numb
   // Auto-block: numără abandon-urile din ultima lună
   if (abandonCfg.autoBlockEnabled && abandonCfg.autoBlockThreshold > 0) {
     const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const enabledGameTypes = abandonCfg.enabledGameTypes ?? [];
+    const enabledGameTypes = (abandonCfg.enabledGameTypes ?? []).map(normalizeGameType);
     if (enabledGameTypes.length === 0) return;
 
     const abandonCount = await prisma.match.count({

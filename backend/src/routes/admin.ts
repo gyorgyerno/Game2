@@ -1188,7 +1188,10 @@ router.get('/users', adminAuth, asyncHandler(async (req: AdminRequest, res: Resp
   const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const userIds = users.map(u => u.id);
   const abandonCfg = systemConfigService.getAbandon();
-  const enabledGameTypes = abandonCfg.enabledGameTypes ?? [];
+  const rawGameTypes = abandonCfg.enabledGameTypes ?? [];
+  // Normalizează alias-urile: 'labirinturi' → 'maze' (DB stochează 'maze')
+  const normalizeGT = (g: string) => g === 'labirinturi' ? 'maze' : g;
+  const enabledGameTypes = [...new Set(rawGameTypes.map(normalizeGT))];
   const abandonRows = await prisma.matchPlayer.findMany({
     where: {
       userId: { in: userIds },
