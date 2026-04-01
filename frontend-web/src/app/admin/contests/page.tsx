@@ -117,17 +117,24 @@ const LEAGUE_COLORS: Record<string, string> = {
   diamond:  'text-blue-400',
 };
 
+// Converts a Date object → "YYYY-MM-DDTHH:mm" in the browser's LOCAL timezone
+// (the value format required by <input type="datetime-local">)
+function toLocalInputValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function defaultStartAt() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   d.setHours(20, 0, 0, 0);
-  return d.toISOString().slice(0, 16);
+  return toLocalInputValue(d);
 }
 function defaultEndAt() {
   const d = new Date();
   d.setDate(d.getDate() + 5);
   d.setHours(22, 0, 0, 0);
-  return d.toISOString().slice(0, 16);
+  return toLocalInputValue(d);
 }
 
 function slugify(s: string) {
@@ -211,8 +218,9 @@ export default function AdminContestsPage() {
         slug: form.slug,
         description: form.description,
         type: form.type,
-        startAt: form.startAt,
-        endAt: form.endAt,
+        // Convert local browser time → UTC ISO before sending to backend
+        startAt: new Date(form.startAt).toISOString(),
+        endAt: new Date(form.endAt).toISOString(),
         maxPlayers: form.maxPlayers ? Number(form.maxPlayers) : null,
         botsCount: Number(form.botsCount) || 0,
         rounds: form.rounds.map((r, i) => ({ order: i + 1, label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
@@ -240,8 +248,9 @@ export default function AdminContestsPage() {
       slug: c.slug,
       description: c.description,
       type: c.type as 'public' | 'private',
-      startAt: c.startAt.slice(0, 16),
-      endAt: c.endAt.slice(0, 16),
+      // Convert UTC from server → local browser time for datetime-local input
+      startAt: toLocalInputValue(new Date(c.startAt)),
+      endAt: toLocalInputValue(new Date(c.endAt)),
       maxPlayers: c.maxPlayers != null ? String(c.maxPlayers) : '',
       botsCount: String(c.botsCount ?? 0),
       rounds: c.rounds.map(r => ({ label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
@@ -345,11 +354,21 @@ export default function AdminContestsPage() {
                 value={form.startAt}
                 onChange={e => setForm(f => ({ ...f, startAt: e.target.value }))}
               />
-              {form.startAt && (
-                <p className="text-xs text-gray-500 mt-1">
-                  🕒 {new Date(form.startAt).toLocaleString('ro-RO', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </p>
-              )}
+              {form.startAt && (() => {
+                const d = new Date(form.startAt);
+                const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                return (
+                  <div className="mt-1 space-y-0.5">
+                    <p className="text-xs text-gray-400">
+                      🌍 <span className="text-orange-400 font-mono">{tz}</span>
+                      {' — '}{d.toLocaleString('ro-RO', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      UTC: {d.toISOString().replace('T', ' ').slice(0, 16)}
+                    </p>
+                  </div>
+                );
+              })()}
             </Field>
             <Field label="Final * (dată + oră)">
               <input
@@ -358,11 +377,21 @@ export default function AdminContestsPage() {
                 value={form.endAt}
                 onChange={e => setForm(f => ({ ...f, endAt: e.target.value }))}
               />
-              {form.endAt && (
-                <p className="text-xs text-gray-500 mt-1">
-                  🏁 {new Date(form.endAt).toLocaleString('ro-RO', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </p>
-              )}
+              {form.endAt && (() => {
+                const d = new Date(form.endAt);
+                const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                return (
+                  <div className="mt-1 space-y-0.5">
+                    <p className="text-xs text-gray-400">
+                      🌍 <span className="text-orange-400 font-mono">{tz}</span>
+                      {' — '}{d.toLocaleString('ro-RO', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      UTC: {d.toISOString().replace('T', ' ').slice(0, 16)}
+                    </p>
+                  </div>
+                );
+              })()}
             </Field>
           </div>
 

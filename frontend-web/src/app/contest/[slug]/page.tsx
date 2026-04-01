@@ -244,12 +244,19 @@ export default function ContestPage() {
 
           {/* Timp */}
           <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
-            <span>
-              🕒 Start: <span className="text-gray-300">{new Date(contest.startAt).toLocaleString('ro-RO')}</span>
-            </span>
-            <span>
-              🏁 Final: <span className="text-gray-300">{new Date(contest.endAt).toLocaleString('ro-RO')}</span>
-            </span>
+            {(() => {
+              const tzShort = new Date().toLocaleTimeString('en', { timeZoneName: 'short' }).split(' ').pop() ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+              return (<>
+                <span>
+                  🕒 Start: <span className="text-gray-300">{new Date(contest.startAt).toLocaleString('ro-RO')}</span>
+                  <span className="text-gray-600 ml-1">({tzShort})</span>
+                </span>
+                <span>
+                  🏁 Final: <span className="text-gray-300">{new Date(contest.endAt).toLocaleString('ro-RO')}</span>
+                  <span className="text-gray-600 ml-1">({tzShort})</span>
+                </span>
+              </>);
+            })()}
           </div>
         </div>
 

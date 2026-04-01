@@ -14,6 +14,7 @@ interface User {
   isBanned: boolean;
   lastIp: string | null;
   createdAt: string;
+  abandonCount30d: number;
   _count: { matchPlayers: number };
 }
 
@@ -58,6 +59,7 @@ function RealUsersTab() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState('');
+  const [banPending, setBanPending] = useState<Record<string, boolean>>({});
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<'rating' | 'league' | 'matches' | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -115,9 +117,15 @@ function RealUsersTab() {
   };
 
   const toggleBan = async (id: string, isBanned: boolean) => {
-    await adminApi.patch(`/api/admin/users/${id}/toggle-ban`);
-    msg(isBanned ? 'User debanat' : 'User banat');
-    load();
+    if (banPending[id]) return;
+    setBanPending((prev) => ({ ...prev, [id]: true }));
+    try {
+      await adminApi.patch(`/api/admin/users/${id}/toggle-ban`);
+      msg(isBanned ? 'User debanat' : 'User banat');
+      await load();
+    } finally {
+      setBanPending((prev) => ({ ...prev, [id]: false }));
+    }
   };
 
   const deleteUser = async (id: string) => {
@@ -180,21 +188,27 @@ function RealUsersTab() {
                   </th>
                 );
               })}
-              {['Înregistrat', 'Acțiuni'].map(h => (
+              {['Abandon 30z', 'Înregistrat', 'Acțiuni'].map(h => (
                 <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 500 }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>Se încarcă...</td></tr>
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>Se încarcă...</td></tr>
             ) : sortedUsers.length === 0 ? (
-              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#475569' }}>Niciun utilizator găsit</td></tr>
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: '#475569' }}>Niciun utilizator găsit</td></tr>
             ) : sortedUsers.map((u, i) => (
               <tr key={u.id} style={{ borderTop: '1px solid #1e2433', background: i % 2 === 0 ? 'transparent' : '#141720' }}>
                 <td style={{ padding: '12px 16px', color: '#e2e8f0', fontWeight: 500 }}>
                   {u.username}
-                  {u.isBanned && (
+                  {u.isBanned && u.abandonCount30d > 0 && (
+                    <span style={{
+                      marginLeft: 6, fontSize: 10, background: '#431407',
+                      color: '#fb923c', padding: '1px 6px', borderRadius: 4, fontWeight: 600,
+                    }}>BANAT · ABANDON</span>
+                  )}
+                  {u.isBanned && u.abandonCount30d === 0 && (
                     <span style={{
                       marginLeft: 6, fontSize: 10, background: '#7f1d1d',
                       color: '#fca5a5', padding: '1px 6px', borderRadius: 4, fontWeight: 600,
@@ -215,6 +229,23 @@ function RealUsersTab() {
                   </span>
                 </td>
                 <td style={{ padding: '12px 16px', color: '#64748b' }}>{u._count.matchPlayers}</td>
+                <td style={{ padding: '12px 16px' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {u.abandonCount30d > 0 ? (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        background: u.isBanned ? '#431407' : '#1c1412',
+                        color: u.isBanned ? '#fb923c' : '#a16207',
+                        padding: '2px 8px', borderRadius: 20, fontSize: 12, fontWeight: 700,
+                        border: `1px solid ${u.isBanned ? '#f9731644' : '#92400e44'}`,
+                      }}>
+                        🚫 {u.abandonCount30d}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#374151', fontSize: 12 }}>—</span>
+                    )}
+                  </div>
+                </td>
                 <td style={{ padding: '12px 16px', color: '#64748b' }}>{new Date(u.createdAt).toLocaleDateString('ro-RO')}</td>
                 <td style={{ padding: '12px 16px' }}>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -229,8 +260,9 @@ function RealUsersTab() {
                       background: u.isBanned ? '#1a3a1a' : '#3a2a0a',
                       color: u.isBanned ? '#86efac' : '#fcd34d',
                       border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                    }}>
-                      {u.isBanned ? '✅ Debanează' : '🚫 Banează'}
+                      opacity: banPending[u.id] ? 0.65 : 1,
+                    }} disabled={!!banPending[u.id]}>
+                      {banPending[u.id] ? 'Se procesează...' : (u.isBanned ? '✅ Debanează' : '🚫 Banează')}
                     </button>
                     <button onClick={() => setConfirmDelete(u.id)} style={{
                       padding: '5px 10px', background: '#3b1515', color: '#fca5a5',

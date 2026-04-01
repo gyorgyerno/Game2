@@ -1,9 +1,11 @@
-import type { Match } from '@integrame/shared';
+import type { Match, MatchPlayer } from '@integrame/shared';
 import type { FrontendGameDefinition } from '@/games/registry';
+
+type MatchPlayerWithUser = MatchPlayer & { user?: { username: string; avatarUrl?: string } };
 
 interface GameLobbyPanelProps {
   gameDef: FrontendGameDefinition | undefined;
-  match: Match | null;
+  match: (Omit<Match, 'players'> & { players: MatchPlayerWithUser[] }) | null;
   maxPlayers: number;
   isAI: boolean;
   allowInvite: boolean;
@@ -106,10 +108,10 @@ export default function GameLobbyPanel({
                   ? `border-transparent ${accent.dot} text-white`
                   : 'border-dashed border-gray-300 bg-gray-50 text-gray-300'
               }`}>
-                {i < playerCount ? (match?.players[i]?.username?.[0]?.toUpperCase() ?? '?') : '?'}
+                {i < playerCount ? ((match?.players[i]?.user?.username || match?.players[i]?.username || '?')[0]?.toUpperCase() ?? '?') : '?'}
               </div>
               <span className="text-xs text-gray-400">
-                {i < playerCount ? (match?.players[i]?.username ?? '…') : '—'}
+                {i < playerCount ? (match?.players[i]?.user?.username || match?.players[i]?.username || '…') : '—'}
               </span>
             </div>
           ))}

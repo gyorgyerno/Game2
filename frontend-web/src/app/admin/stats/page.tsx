@@ -28,6 +28,21 @@ interface Overview {
   matchTimeline: { date: string; count: number }[];
 }
 
+// ─── Types — Abandon Stats ───────────────────────────────────────────────────
+interface AbandonWindow {
+  total: number;
+  solo: number;
+  multi: number;
+  perGame: Record<string, number>;
+  perLevel: Record<string, number>;
+}
+interface AbandonStats {
+  windows: { '7d': AbandonWindow; '14d': AbandonWindow; '30d': AbandonWindow };
+  topAbandoners: { username: string; count: number }[];
+  blockedCount: number;
+  timeline: { date: string; count: number }[];
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PERIOD_LABELS: Record<string, string> = { day: 'Azi (24h)', week: 'Săptămâna', month: 'Luna' };
 
@@ -139,14 +154,22 @@ function PeriodBtn({ p, active, onClick }: { p: string; active: boolean; onClick
 export default function StatsPage() {
   const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week');
   const [data, setData] = useState<Overview | null>(null);
+  const [abandonData, setAbandonData] = useState<AbandonStats | null>(null);
+  const [abandonWindow, setAbandonWindow] = useState<'7d' | '14d' | '30d'>('7d');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback((p: string) => {
     setLoading(true);
     setError('');
-    adminApi.get(`/api/admin/stats/overview?period=${p}`)
-      .then(r => setData(r.data))
+    Promise.all([
+      adminApi.get(`/api/admin/stats/overview?period=${p}`),
+      adminApi.get('/api/admin/stats/abandon'),
+    ])
+      .then(([overviewRes, abandonRes]) => {
+        setData(overviewRes.data);
+        setAbandonData(abandonRes.data);
+      })
       .catch(() => setError('Eroare la încărcarea statisticilor'))
       .finally(() => setLoading(false));
   }, []);
@@ -335,6 +358,125 @@ export default function StatsPage() {
               );
             })}
           </div>
+
+          {/* ── Row 6: Abandon stats ───────────────────────────────────────── */}
+          {abandonData && (() => {
+            const win = abandonData.windows[abandonWindow];
+            const maxGame = Math.max(...Object.values(win.perGame), 1);
+            const maxLevel = Math.max(...Object.values(win.perLevel), 1);
+            return (
+              <Card>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+                  <SectionTitle>🚫 Statistici Abandon</SectionTitle>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {(['7d', '14d', '30d'] as const).map(w => (
+                      <button key={w} onClick={() => setAbandonWindow(w)} style={{
+                        padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, border: 'none',
+                        background: abandonWindow === w ? '#f97316' : '#2d3748',
+                        color: abandonWindow === w ? '#fff' : '#94a3b8',
+                        transition: 'background .15s',
+                      }}>
+                        {w === '7d' ? '7 zile' : w === '14d' ? '14 zile' : '30 zile'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+
+                  {/* KPI-uri fereastra selectată */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      {[
+                        { label: 'Total abandon-uri', value: win.total, color: '#f97316', icon: '🚫' },
+                        { label: 'Solo', value: win.solo, color: '#fb923c', icon: '🎮' },
+                        { label: 'Multiplayer', value: win.multi, color: '#ef4444', icon: '👥' },
+                      ].map(({ label, value, color, icon }) => (
+                        <div key={label} style={{
+                          flex: 1, background: '#0f1117', border: `1px solid ${color}33`,
+                          borderRadius: 10, padding: '14px 12px', textAlign: 'center',
+                        }}>
+                          <div style={{ fontSize: 20, marginBottom: 6 }}>{icon}</div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color }}>{value}</div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{
+                      background: '#0f1117', border: '1px solid #ef444433',
+                      borderRadius: 10, padding: '14px 16px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    }}>
+                      <div>
+                        <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600 }}>🔒 Useri blocați auto</div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Total activi în sistem</div>
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: '#ef4444' }}>{abandonData.blockedCount}</div>
+                    </div>
+                  </div>
+
+                  {/* Per joc + per nivel */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Per joc</div>
+                      {Object.keys(win.perGame).length === 0
+                        ? <div style={{ color: '#475569', fontSize: 13 }}>Niciun abandon în perioada selectată.</div>
+                        : Object.entries(win.perGame).sort(([, a], [, b]) => b - a).map(([game, count]) => (
+                          <HBar key={game} label={game} value={count} max={maxGame} color={gameColor(game)} />
+                        ))
+                      }
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Per nivel</div>
+                      {Object.keys(win.perLevel).length === 0
+                        ? <div style={{ color: '#475569', fontSize: 13 }}>—</div>
+                        : Object.entries(win.perLevel).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([lvl, count]) => (
+                          <HBar key={lvl} label={lvl} value={count} max={maxLevel} color="#f97316" />
+                        ))
+                      }
+                    </div>
+                  </div>
+
+                  {/* Top abandoners + sparkline */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Top abandoners — 30 zile</div>
+                      {abandonData.topAbandoners.length === 0
+                        ? <div style={{ color: '#475569', fontSize: 13 }}>Niciun abandon înregistrat.</div>
+                        : abandonData.topAbandoners.map((u, i) => (
+                          <div key={u.username} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '7px 0', borderBottom: '1px solid #1e253444',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ color: '#475569', fontSize: 12, width: 16 }}>#{i + 1}</span>
+                              <span style={{ color: '#e2e8f0', fontSize: 13 }}>{u.username}</span>
+                            </div>
+                            <span style={{
+                              background: '#f9731622', color: '#fb923c',
+                              padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700,
+                            }}>{u.count}</span>
+                          </div>
+                        ))
+                      }
+                    </div>
+                    {abandonData.timeline.length > 1 && (
+                      <div>
+                        <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Trend abandon — 30 zile</div>
+                        <Sparkline data={abandonData.timeline.map(r => r.count)} color="#f97316" height={56} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#475569', marginTop: 4 }}>
+                          <span>{abandonData.timeline[0]?.date.slice(5)}</span>
+                          <span>{abandonData.timeline[abandonData.timeline.length - 1]?.date.slice(5)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              </Card>
+            );
+          })()}
 
         </div>
       )}

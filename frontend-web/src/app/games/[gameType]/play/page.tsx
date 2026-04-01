@@ -1,6 +1,6 @@
 'use client';
 import { Suspense } from 'react';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import '../../../globals-game.css';
 import GameRenderer from '@/games/GameRenderer';
@@ -57,6 +57,7 @@ function GamePlayPageInner({ params }: PageProps) {
   const [mazeSeed, setMazeSeed] = useState<number | undefined>(undefined);
   const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const mountTimeRef = useRef<number>(0);
   const staticRules = GAME_RULES[canonicalGameType] || GAME_RULES['integrame'];
   const [serverTimeLimit, setServerTimeLimit] = useState<number>(staticRules.timeLimit);
 
@@ -121,8 +122,10 @@ function GamePlayPageInner({ params }: PageProps) {
       }
       setMatch(m);
       if (m?.status === 'active') { setStarted(true); }
-      if (m?.status === 'abandoned') { router.replace(`/games/${gameType}`); return; }
-    }).catch(() => {});
+      if (m?.status === 'abandoned') { router.replace('/dashboard'); return; }
+    }).catch((err: any) => {
+      if (err?.response?.status === 404) router.replace('/dashboard');
+    });
 
     const socket = getSocket();
     socket.emit(SOCKET_EVENTS.JOIN_MATCH, { matchId });
@@ -141,7 +144,7 @@ function GamePlayPageInner({ params }: PageProps) {
         setTimeout(() => router.push(`/games/${gameType}/result?matchId=${matchId}`), 500);
       }
       if (m.status === 'abandoned') {
-        router.replace(`/games/${gameType}`);
+        router.replace('/dashboard');
       }
     });
     socket.on(SOCKET_EVENTS.MATCH_COUNTDOWN, ({ countdown: c }: { countdown: number }) => setCountdown(c));
@@ -193,10 +196,17 @@ function GamePlayPageInner({ params }: PageProps) {
           setTimeout(() => router.push(`/games/${gameType}/result?matchId=${matchId}`), 500);
         } else if (m.status === 'abandoned') {
           heartbeatActive = false;
-          router.replace(`/games/${gameType}`);
+          router.replace('/dashboard');
         }
-      } catch { /* ignore */ }
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          heartbeatActive = false;
+          router.replace('/dashboard');
+        }
+      }
     }, 2000);
+
+    mountTimeRef.current = Date.now();
 
     return () => {
       heartbeatActive = false;
@@ -209,7 +219,11 @@ function GamePlayPageInner({ params }: PageProps) {
       socket.off(SOCKET_EVENTS.MATCH_FINISHED);
       socket.off('opponent_left');
       socket.off(SOCKET_EVENTS.REACTION_RECEIVED);
-      socket.emit(SOCKET_EVENTS.LEAVE_MATCH, { matchId });
+      // Emit LEAVE_MATCH doar dacă componenta a trăit >500ms
+      // Previne React StrictMode double-mount să distrugă match-ul la montare
+      if (Date.now() - mountTimeRef.current > 500) {
+        socket.emit(SOCKET_EVENTS.LEAVE_MATCH, { matchId });
+      }
     };
   }, [matchId, token, user?.id]);
 

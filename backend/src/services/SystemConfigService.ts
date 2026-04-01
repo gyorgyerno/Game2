@@ -47,6 +47,29 @@ export interface UiConfig {
   aiAssistantEnabled: boolean;
 }
 
+// ─── Penalizare Abandon ───────────────────────────────────────────────────────
+export interface AbandonPenaltyPerLevel {
+  /** Nivelul jocului (1, 2, 3, ...) */
+  level: number;
+  /** XP dedus la abandon solo (ex: -20) */
+  xpPenaltySolo: number;
+  /** XP dedus la abandon multiplayer (ex: -50) */
+  xpPenaltyMulti: number;
+}
+
+export interface AbandonConfig {
+  /** Activează sistemul de penalizări la abandon */
+  enabled: boolean;
+  /** Jocuri pentru care sistemul de penalizări este activ (canonical gameType) */
+  enabledGameTypes: string[];
+  /** Penalizări per nivel */
+  penaltiesPerLevel: AbandonPenaltyPerLevel[];
+  /** Câte abandon-uri pe lună declanșează auto-block */
+  autoBlockThreshold: number;
+  /** Activează auto-block după N abandon-uri/lună */
+  autoBlockEnabled: boolean;
+}
+
 // ─── Default-uri (identice cu shared/) ───────────────────────────────────────
 
 export const DEFAULT_ELO: Readonly<EloConfig> = {
@@ -75,6 +98,20 @@ export const DEFAULT_UI: Readonly<UiConfig> = {
   aiAssistantEnabled: true,
 };
 
+export const DEFAULT_ABANDON: Readonly<AbandonConfig> = {
+  enabled: false,
+  enabledGameTypes: [],
+  penaltiesPerLevel: [
+    { level: 1, xpPenaltySolo: -10, xpPenaltyMulti: -25 },
+    { level: 2, xpPenaltySolo: -15, xpPenaltyMulti: -35 },
+    { level: 3, xpPenaltySolo: -20, xpPenaltyMulti: -50 },
+    { level: 4, xpPenaltySolo: -25, xpPenaltyMulti: -65 },
+    { level: 5, xpPenaltySolo: -30, xpPenaltyMulti: -80 },
+  ],
+  autoBlockThreshold: 5,
+  autoBlockEnabled: false,
+};
+
 // ─── Limite de validare ───────────────────────────────────────────────────────
 
 export const ELO_LIMITS = {
@@ -100,6 +137,7 @@ class SystemConfigService {
   private xp: XpConfig = { ...DEFAULT_XP };
   private league: LeagueConfig = { ...DEFAULT_LEAGUE };
   private ui: UiConfig = { ...DEFAULT_UI };
+  private abandon: AbandonConfig = { ...DEFAULT_ABANDON, penaltiesPerLevel: [...DEFAULT_ABANDON.penaltiesPerLevel] };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async load(prismaClient: any): Promise<void> {
@@ -108,10 +146,45 @@ class SystemConfigService {
       for (const row of rows) {
         try {
           const val = JSON.parse(row.value);
-          if (row.key === 'elo')    this.elo    = { ...DEFAULT_ELO,    ...val };
-          if (row.key === 'xp')     this.xp     = { ...DEFAULT_XP,     ...val };
-          if (row.key === 'league') this.league = { ...DEFAULT_LEAGUE, ...val };
-          if (row.key === 'ui')     this.ui     = { ...DEFAULT_UI,     ...val };
+          if (row.key === 'elo')     this.elo    = { ...DEFAULT_ELO,    ...val };
+          if (row.key === 'xp')      this.xp     = { ...DEFAULT_XP,     ...val };
+          if (row.key === 'league')  this.league = { ...DEFAULT_LEAGUE, ...val };
+          if (row.key === 'ui') {
+            this.ui = {
+              ...DEFAULT_UI,
+              ...(typeof val.aiAssistantEnabled === 'boolean' ? { aiAssistantEnabled: val.aiAssistantEnabled } : {}),
+            };
+          }
+          if (row.key === 'abandon') {
+            const penaltiesPerLevel = Array.isArray(val.penaltiesPerLevel)
+              ? val.penaltiesPerLevel
+                  .filter((p: unknown): p is { level: number; xpPenaltySolo: number; xpPenaltyMulti: number } => {
+                    if (!p || typeof p !== 'object') return false;
+                    const pp = p as { level?: unknown; xpPenaltySolo?: unknown; xpPenaltyMulti?: unknown };
+                    return Number.isFinite(pp.level as number)
+                      && Number.isFinite(pp.xpPenaltySolo as number)
+                      && Number.isFinite(pp.xpPenaltyMulti as number);
+                  })
+                  .map((p: { level: number; xpPenaltySolo: number; xpPenaltyMulti: number }) => ({
+                    level: Math.max(1, Math.trunc(p.level)),
+                    xpPenaltySolo: Math.min(0, Math.trunc(p.xpPenaltySolo)),
+                    xpPenaltyMulti: Math.min(0, Math.trunc(p.xpPenaltyMulti)),
+                  }))
+              : [...DEFAULT_ABANDON.penaltiesPerLevel];
+
+            this.abandon = {
+              ...DEFAULT_ABANDON,
+              enabled: typeof val.enabled === 'boolean' ? val.enabled : DEFAULT_ABANDON.enabled,
+              enabledGameTypes: Array.isArray(val.enabledGameTypes)
+                ? val.enabledGameTypes.filter((g: unknown): g is string => typeof g === 'string')
+                : [...DEFAULT_ABANDON.enabledGameTypes],
+              autoBlockEnabled: typeof val.autoBlockEnabled === 'boolean' ? val.autoBlockEnabled : DEFAULT_ABANDON.autoBlockEnabled,
+              autoBlockThreshold: Number.isInteger(val.autoBlockThreshold)
+                ? Math.max(1, Math.min(100, val.autoBlockThreshold))
+                : DEFAULT_ABANDON.autoBlockThreshold,
+              penaltiesPerLevel,
+            };
+          }
         } catch { /* invalid JSON — ignorat */ }
       }
     } catch (err) {
@@ -121,17 +194,24 @@ class SystemConfigService {
 
   // ─── Getters ─────────────────────────────────────────────────────────────────
 
-  getElo(): EloConfig    { return { ...this.elo }; }
-  getXp(): XpConfig      { return { ...this.xp }; }
-  getLeague(): LeagueConfig { return { ...this.league }; }
-  getUi(): UiConfig      { return { ...this.ui }; }
+  getElo(): EloConfig       { return { ...this.elo }; }
+  getXp(): XpConfig         { return { ...this.xp }; }
+  getLeague(): LeagueConfig  { return { ...this.league }; }
+  getUi(): UiConfig          { return { ...this.ui }; }
+  getAbandon(): AbandonConfig { return { ...this.abandon, penaltiesPerLevel: [...this.abandon.penaltiesPerLevel] }; }
 
   // ─── Setters (doar în memorie — salvarea în DB se face în admin route) ────────
 
-  setElo(cfg: Partial<EloConfig>): void    { Object.assign(this.elo, cfg); }
-  setXp(cfg: Partial<XpConfig>): void      { Object.assign(this.xp, cfg); }
-  setLeague(cfg: Partial<LeagueConfig>): void { Object.assign(this.league, cfg); }
-  setUi(cfg: Partial<UiConfig>): void      { Object.assign(this.ui, cfg); }
+  setElo(cfg: Partial<EloConfig>): void       { Object.assign(this.elo, cfg); }
+  setXp(cfg: Partial<XpConfig>): void         { Object.assign(this.xp, cfg); }
+  setLeague(cfg: Partial<LeagueConfig>): void  { Object.assign(this.league, cfg); }
+  setUi(cfg: Partial<UiConfig>): void          { Object.assign(this.ui, cfg); }
+  setAbandon(cfg: Partial<AbandonConfig>): void {
+    if (cfg.penaltiesPerLevel !== undefined) {
+      this.abandon.penaltiesPerLevel = cfg.penaltiesPerLevel;
+    }
+    Object.assign(this.abandon, cfg);
+  }
 
   // ─── Funcții de calcul (înlocuiesc cele din shared/) ──────────────────────────
 
@@ -173,15 +253,17 @@ class SystemConfigService {
 
   getSnapshot() {
     return {
-      elo:    this.getElo(),
-      xp:     this.getXp(),
-      league: this.getLeague(),
-      ui:     this.getUi(),
+      elo:     this.getElo(),
+      xp:      this.getXp(),
+      league:  this.getLeague(),
+      ui:      this.getUi(),
+      abandon: this.getAbandon(),
       defaults: {
-        elo:    DEFAULT_ELO,
-        xp:     DEFAULT_XP,
-        league: DEFAULT_LEAGUE,
-        ui:     DEFAULT_UI,
+        elo:     DEFAULT_ELO,
+        xp:      DEFAULT_XP,
+        league:  DEFAULT_LEAGUE,
+        ui:      DEFAULT_UI,
+        abandon: DEFAULT_ABANDON,
       },
       limits: {
         elo: ELO_LIMITS,

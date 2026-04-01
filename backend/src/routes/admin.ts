@@ -9,7 +9,7 @@ import { config } from '../config';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { asyncHandler } from '../middleware/errorHandler';
 import { gameRegistry } from '../games/GameRegistry';
-import { systemConfigService, DEFAULT_ELO, DEFAULT_XP, DEFAULT_LEAGUE, DEFAULT_UI, ELO_LIMITS, XP_LIMITS, LEAGUE_LIMITS } from '../services/SystemConfigService';
+import { systemConfigService, DEFAULT_ELO, DEFAULT_XP, DEFAULT_LEAGUE, DEFAULT_UI, DEFAULT_ABANDON, ELO_LIMITS, XP_LIMITS, LEAGUE_LIMITS } from '../services/SystemConfigService';
 import { simulatedMatchOrchestrator } from '../services/simulatedPlayers/SimulatedMatchOrchestrator';
 import { activityFeedGenerator } from '../services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from '../services/simulatedPlayers/BotChatGenerator';
@@ -212,6 +212,68 @@ router.get('/stats/overview', adminAuth, asyncHandler(async (req: AdminRequest, 
     topUsers,
     registrationTimeline,
     matchTimeline,
+  });
+}));
+
+// ─── GET /api/admin/stats/abandon ────────────────────────────────────────────
+router.get('/stats/abandon', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const now = new Date();
+  const since7  = new Date(now.getTime() -  7 * 24 * 60 * 60 * 1000);
+  const since14 = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const since30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const [all30, blockedCount] = await Promise.all([
+    prisma.match.findMany({
+      where: { finishedAt: { gte: since30 }, status: 'abandoned' },
+      select: { gameType: true, level: true, isAI: true, finishedAt: true,
+        players: { select: { userId: true, user: { select: { username: true, userType: true } } } } },
+    }),
+    prisma.user.count({ where: { isBanned: true, userType: 'REAL' } }),
+  ]);
+
+  function buildWindow(sinceDate: Date) {
+    const rows = all30.filter(m => m.finishedAt && m.finishedAt >= sinceDate);
+    const total = rows.length;
+    const solo  = rows.filter(m => m.isAI).length;
+    const multi = rows.filter(m => !m.isAI).length;
+
+    const perGame:  Record<string, number> = {};
+    const perLevel: Record<string, number> = {};
+    for (const m of rows) {
+      perGame[m.gameType] = (perGame[m.gameType] ?? 0) + 1;
+      const k = `Nivel ${m.level}`;
+      perLevel[k] = (perLevel[k] ?? 0) + 1;
+    }
+    return { total, solo, multi, perGame, perLevel };
+  }
+
+  // Top abandoners (REAL users) last 30 days
+  const abandonerMap: Record<string, { username: string; count: number }> = {};
+  for (const m of all30) {
+    for (const p of m.players) {
+      if (p.user.userType !== 'REAL') continue;
+      if (!abandonerMap[p.userId]) abandonerMap[p.userId] = { username: p.user.username, count: 0 };
+      abandonerMap[p.userId].count++;
+    }
+  }
+  const topAbandoners = Object.values(abandonerMap)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  // Timeline abandonuri pe zi (30 zile)
+  const byDay: Record<string, number> = {};
+  for (const m of all30) {
+    if (!m.finishedAt) continue;
+    const d = m.finishedAt.toISOString().split('T')[0];
+    byDay[d] = (byDay[d] ?? 0) + 1;
+  }
+  const timeline = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count }));
+
+  res.json({
+    windows: { '7d': buildWindow(since7), '14d': buildWindow(since14), '30d': buildWindow(since30) },
+    topAbandoners,
+    blockedCount,
+    timeline,
   });
 }));
 
@@ -1121,18 +1183,60 @@ router.get('/users', adminAuth, asyncHandler(async (req: AdminRequest, res: Resp
     }),
     prisma.user.count({ where }),
   ]);
-  res.json({ users, total, page, totalPages: Math.ceil(total / limit) });
+
+  // Abandon count per user (30 zile) — numai pentru userii de pe pagina curentă
+  const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const userIds = users.map(u => u.id);
+  const abandonCfg = systemConfigService.getAbandon();
+  const enabledGameTypes = abandonCfg.enabledGameTypes ?? [];
+  const abandonRows = await prisma.matchPlayer.findMany({
+    where: {
+      userId: { in: userIds },
+      match: {
+        status: 'abandoned',
+        finishedAt: { gte: since30 },
+        ...(enabledGameTypes.length > 0 ? { gameType: { in: enabledGameTypes } } : {}),
+      },
+    },
+    select: { userId: true },
+  });
+  const abandonMap: Record<string, number> = {};
+  for (const row of abandonRows) {
+    abandonMap[row.userId] = (abandonMap[row.userId] ?? 0) + 1;
+  }
+  const usersWithAbandon = users.map(u => ({ ...u, abandonCount30d: abandonMap[u.id] ?? 0 }));
+
+  res.json({ users: usersWithAbandon, total, page, totalPages: Math.ceil(total / limit) });
 }));
 
 // ─── DELETE /api/admin/users/:id ─────────────────────────────────────────────
 router.delete('/users/:id', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
   const { id } = req.params;
-  await prisma.matchPlayer.deleteMany({ where: { userId: id } });
-  await prisma.userGameStats.deleteMany({ where: { userId: id } });
-  await prisma.invite.deleteMany({ where: { createdBy: id } });
-  await prisma.user.delete({ where: { id } });
+
+  const user = await prisma.user.findUnique({ where: { id }, select: { id: true, username: true } });
+  if (!user) {
+    res.status(404).json({ error: 'User inexistent' });
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.friendship.deleteMany({ where: { OR: [{ senderId: id }, { receiverId: id }] } });
+    await tx.matchPlayer.deleteMany({ where: { userId: id } });
+    await tx.userGameStats.deleteMany({ where: { userId: id } });
+    await tx.userSoloGameProgress.deleteMany({ where: { userId: id } });
+    await tx.aIPlayerProfile.deleteMany({ where: { userId: id } });
+    await tx.playerSkillProfile.deleteMany({ where: { userId: id } });
+    await tx.ghostRun.deleteMany({ where: { playerId: id } });
+    await tx.bonusChallengeAward.deleteMany({ where: { userId: id } });
+    await tx.contestPlayer.deleteMany({ where: { userId: id } });
+    await tx.contestScore.deleteMany({ where: { userId: id } });
+    await tx.invite.deleteMany({ where: { createdBy: id } });
+    await tx.bannedIP.deleteMany({ where: { bannedUserId: id } });
+    await tx.user.delete({ where: { id } });
+  });
+
   logger.warn(`[ADMIN] User sters: ${id} de catre ${req.adminUsername}`);
-  res.json({ message: 'User sters' });
+  res.json({ message: 'User sters', user: { id: user.id, username: user.username } });
 }));
 
 // ─── PATCH /api/admin/users/:id/reset-rating ──────────────────────────────────
@@ -1651,20 +1755,87 @@ router.patch('/system-config/ui', adminAuth, asyncHandler(async (req: AdminReque
   res.json({ ui: systemConfigService.getUi(), defaults: DEFAULT_UI });
 }));
 
+// ─── PATCH /api/admin/system-config/abandon ───────────────────────────────────
+router.patch('/system-config/abandon', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { gameType, enabled, autoBlockEnabled, autoBlockThreshold, penaltiesPerLevel } = req.body as {
+    gameType?: string;
+    enabled?: boolean;
+    autoBlockEnabled?: boolean;
+    autoBlockThreshold?: number;
+    penaltiesPerLevel?: Array<{ level: number; xpPenaltySolo: number; xpPenaltyMulti: number }>;
+  };
+
+  const canonicalGameType = gameType ? toCanonicalGameType(gameType) : undefined;
+  if (canonicalGameType !== undefined && !gameRegistry.isRegistered(canonicalGameType)) {
+    res.status(400).json({ error: 'gameType invalid pentru configurarea abandon' });
+    return;
+  }
+
+  if (enabled !== undefined && typeof enabled !== 'boolean') {
+    res.status(400).json({ error: 'enabled trebuie să fie boolean' }); return;
+  }
+  if (autoBlockEnabled !== undefined && typeof autoBlockEnabled !== 'boolean') {
+    res.status(400).json({ error: 'autoBlockEnabled trebuie să fie boolean' }); return;
+  }
+  if (autoBlockThreshold !== undefined && (typeof autoBlockThreshold !== 'number' || autoBlockThreshold < 1 || autoBlockThreshold > 100)) {
+    res.status(400).json({ error: 'autoBlockThreshold trebuie să fie între 1 și 100' }); return;
+  }
+  if (penaltiesPerLevel !== undefined) {
+    if (!Array.isArray(penaltiesPerLevel)) {
+      res.status(400).json({ error: 'penaltiesPerLevel trebuie să fie array' }); return;
+    }
+    for (const p of penaltiesPerLevel) {
+      if (typeof p.level !== 'number' || typeof p.xpPenaltySolo !== 'number' || typeof p.xpPenaltyMulti !== 'number') {
+        res.status(400).json({ error: 'Fiecare penalizare trebuie să aibă level, xpPenaltySolo, xpPenaltyMulti numerice' }); return;
+      }
+      if (p.xpPenaltySolo > 0 || p.xpPenaltyMulti > 0) {
+        res.status(400).json({ error: 'Penalizările XP trebuie să fie 0 sau negative' }); return;
+      }
+    }
+  }
+
+  const current = systemConfigService.getAbandon();
+  const enabledSet = new Set(current.enabledGameTypes ?? []);
+  if (canonicalGameType !== undefined && enabled !== undefined) {
+    if (enabled) enabledSet.add(canonicalGameType);
+    else enabledSet.delete(canonicalGameType);
+  }
+
+  const merged = {
+    ...current,
+    enabled: enabledSet.size > 0,
+    enabledGameTypes: [...enabledSet].sort(),
+    ...(autoBlockEnabled !== undefined ? { autoBlockEnabled } : {}),
+    ...(autoBlockThreshold !== undefined ? { autoBlockThreshold } : {}),
+    ...(penaltiesPerLevel !== undefined ? { penaltiesPerLevel } : {}),
+  };
+
+  await prisma.systemConfig.upsert({
+    where: { key: 'abandon' },
+    create: { key: 'abandon', value: JSON.stringify(merged), updatedBy: req.adminUsername },
+    update: { value: JSON.stringify(merged), updatedBy: req.adminUsername },
+  });
+  systemConfigService.setAbandon(merged);
+
+  logger.info('[ADMIN] SystemConfig Abandon updated', { admin: req.adminUsername, merged });
+  res.json({ abandon: systemConfigService.getAbandon(), defaults: DEFAULT_ABANDON });
+}));
+
 // ─── DELETE /api/admin/system-config/:key — reset la default ─────────────────
 router.delete('/system-config/:key', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
   const key = req.params.key;
-  if (!['elo', 'xp', 'league', 'ui'].includes(key)) {
-    res.status(400).json({ error: 'Key invalid. Valori acceptate: elo, xp, league, ui' });
+  if (!['elo', 'xp', 'league', 'ui', 'abandon'].includes(key)) {
+    res.status(400).json({ error: 'Key invalid. Valori acceptate: elo, xp, league, ui, abandon' });
     return;
   }
 
   await prisma.systemConfig.deleteMany({ where: { key } });
 
-  if (key === 'elo')    systemConfigService.setElo({ ...DEFAULT_ELO });
-  if (key === 'xp')     systemConfigService.setXp({ ...DEFAULT_XP });
-  if (key === 'league') systemConfigService.setLeague({ ...DEFAULT_LEAGUE });
-  if (key === 'ui')     systemConfigService.setUi({ ...DEFAULT_UI });
+  if (key === 'elo')     systemConfigService.setElo({ ...DEFAULT_ELO });
+  if (key === 'xp')      systemConfigService.setXp({ ...DEFAULT_XP });
+  if (key === 'league')  systemConfigService.setLeague({ ...DEFAULT_LEAGUE });
+  if (key === 'ui')      systemConfigService.setUi({ ...DEFAULT_UI });
+  if (key === 'abandon') systemConfigService.setAbandon({ ...DEFAULT_ABANDON, penaltiesPerLevel: [...DEFAULT_ABANDON.penaltiesPerLevel] });
 
   logger.info(`[ADMIN] SystemConfig ${key} reset la default`, { admin: req.adminUsername });
   res.json({ ok: true, reset: key });

@@ -541,8 +541,8 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
     socketMatchMap.delete(socket.id);
     progressRateState.delete(socket.id);
     socket.leave(`match:${matchId}`);
-    // Daca meciul e activ, playerul care pleaca forfeiaza
-    handlePlayerLeft(io, userId, matchId).catch(() => {});
+    // Navigare explicita: procesam si matching-urile in asteptare
+    handlePlayerLeft(io, userId, matchId, true).catch(() => {});
   });
 
   // ─── Disconnect (inchide browserul / pierde conexiunea) ──────────────────────
@@ -551,13 +551,65 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
     socketMatchMap.delete(socket.id);
     progressRateState.delete(socket.id);
     if (matchId) {
-      handlePlayerLeft(io, userId, matchId).catch(() => {});
+      // La disconnect temporar NU atingem matching-urile in 'waiting' —
+      // cleanup-ul periodic (15 min) se ocupa de ele; botii pot intra intre timp
+      handlePlayerLeft(io, userId, matchId, false).catch(() => {});
     }
   });
 }
 
+// ─── Penalizare abandon: deduce XP + auto-block dacă prea multe abandon-uri ──
+async function applyAbandonPenalty(userId: string, gameType: string, level: number, isAI: boolean): Promise<void> {
+  const abandonCfg = systemConfigService.getAbandon();
+  if (!abandonCfg.enabledGameTypes?.includes(gameType)) return;
+
+  // Nu penalizăm userii SIMULATED / GHOST
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { userType: true, xp: true } });
+  if (!user || user.userType !== 'REAL') return;
+
+  // Găsește penalizarea pentru nivelul curent (fallback la ultimul nivel configurat)
+  const penalties = [...abandonCfg.penaltiesPerLevel].sort((a, b) => a.level - b.level);
+  const penaltyRow = penalties.find((p) => p.level === level) ?? penalties[penalties.length - 1];
+
+  if (penaltyRow) {
+    const xpDelta = isAI ? penaltyRow.xpPenaltySolo : penaltyRow.xpPenaltyMulti;
+    if (xpDelta !== 0) {
+      const newXp = Math.max(0, user.xp + xpDelta);
+      await prisma.user.update({ where: { id: userId }, data: { xp: newXp } });
+      logger.info('Abandon XP penalty applied', { userId, level, isAI, xpDelta, newXp });
+    }
+  }
+
+  // Auto-block: numără abandon-urile din ultima lună
+  if (abandonCfg.autoBlockEnabled && abandonCfg.autoBlockThreshold > 0) {
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const enabledGameTypes = abandonCfg.enabledGameTypes ?? [];
+    if (enabledGameTypes.length === 0) return;
+
+    const abandonCount = await prisma.match.count({
+      where: {
+        status: 'abandoned',
+        gameType: { in: enabledGameTypes },
+        finishedAt: { gte: monthAgo },
+        players: { some: { userId } },
+      },
+    });
+    if (abandonCount >= abandonCfg.autoBlockThreshold) {
+      await prisma.user.update({ where: { id: userId }, data: { isBanned: true } });
+      logger.warn('User auto-blocat dupa abandon excesiv', {
+        userId,
+        abandonCount,
+        threshold: abandonCfg.autoBlockThreshold,
+        enabledGameTypes,
+      });
+    }
+  }
+}
+
 // ─── Forfeit: un jucator a parasit meciul activ ──────────────────────────────
-async function handlePlayerLeft(io: SocketServer, userId: string, matchId: string) {
+// explicit=true → LEAVE_MATCH (navigare voluntara): procesam si lobby-uri waiting
+// explicit=false → disconnect (poate fi tranzitoriu): ignoram waiting, botii continua
+async function handlePlayerLeft(io: SocketServer, userId: string, matchId: string, explicit = false) {
   if (!matchId) return;
 
   const match = await prisma.match.findUnique({
@@ -569,16 +621,37 @@ async function handlePlayerLeft(io: SocketServer, userId: string, matchId: strin
 
   // ─── Caz special: userul a plecat inainte sa inceapa jocul (match in asteptare) ──
   if (match.status === 'waiting') {
-    logger.info('Jucator a abandonat meciul in asteptare', { userId, matchId });
-    const now = new Date();
-    await prisma.matchPlayer.updateMany({
+    if (!explicit) {
+      // Disconnect tranzitoriu — nu atingem match-ul; userul se poate reconecta
+      // iar botii pot intra in acest interval. Cleanup periodic (15 min) curata stale.
+      logger.info('Disconnect tranzitoriu in lobby waiting, ignorat', { userId, matchId });
+      return;
+    }
+
+    logger.info('Jucator a iesit explicit din lobby-ul in asteptare', { userId, matchId });
+
+    // Stergem playerul real care a plecat voluntar
+    await prisma.matchPlayer.deleteMany({
       where: { matchId, userId },
-      data: { score: 0, finishedAt: now },
     });
-    await prisma.match.update({
-      where: { id: matchId },
-      data: { status: 'abandoned', finishedAt: now },
+
+    // Daca n-au ramas jucatori REALI, stergem tot match-ul (botii nu joaca singuri)
+    const remainingRealPlayers = await prisma.matchPlayer.count({
+      where: { matchId, user: { userType: 'REAL' } },
     });
+    if (remainingRealPlayers === 0) {
+      await prisma.match.delete({ where: { id: matchId } }).catch(() => {});
+      logger.info('Lobby waiting sters (fara jucatori reali)', { matchId });
+    } else {
+      const updated = await prisma.match.findUnique({
+        where: { id: matchId },
+        include: { players: { include: { user: true } } },
+      });
+      if (updated) {
+        io.to(`match:${matchId}`).emit(SOCKET_EVENTS.MATCH_STATE, updated);
+      }
+    }
+
     return;
   }
 
@@ -605,6 +678,11 @@ async function handlePlayerLeft(io: SocketServer, userId: string, matchId: strin
     where: { matchId, userId },
     data: { score: 0, finishedAt: now, correctAnswers: 0, mistakes: 0 },
   });
+
+  // Aplică penalizare XP + verifică auto-block doar dacă jocul are abandon activat
+  await applyAbandonPenalty(userId, match.gameType, match.level, match.isAI).catch((err) =>
+    logger.warn('applyAbandonPenalty failed', { err, userId, matchId }),
+  );
 
   // Marcheaza ceilalti jucatori ca terminati + bonus forfeit (per joc)
   const FORFEIT_BONUS = gameRegistry.getEffectiveRules(match.gameType, match.level)?.forfeitBonus ?? gameRegistry.getForfeitBonus(match.gameType);
@@ -889,7 +967,10 @@ async function finalizeMatch(io: SocketServer, matchId: string, room: string, fo
       }
     }
 
-    await prisma.match.update({ where: { id: matchId }, data: { status: 'finished', finishedAt: new Date() } });
+    await prisma.match.update({
+      where: { id: matchId },
+      data: { status: forfeitUserId ? 'abandoned' : 'finished', finishedAt: new Date() },
+    });
 
     const final = await prisma.match.findUnique({
       where: { id: matchId },

@@ -381,6 +381,8 @@ export default function DashboardPage() {
           <div className="space-y-3">
             {activeContests.filter(c => c.status === 'waiting' || c.status === 'live').map((c) => {
               const isLive = c.status === 'live';
+              const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+              const tzShort = new Date().toLocaleTimeString('en', { timeZoneName: 'short' }).split(' ').pop() ?? tz;
               const startDate = new Date(c.startAt).toLocaleString('ro-RO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
               const endDate = new Date(c.endAt).toLocaleString('ro-RO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
               return (
@@ -410,7 +412,7 @@ export default function DashboardPage() {
                         <p className="text-slate-300/70 text-sm mt-0.5 line-clamp-1">{c.description}</p>
                       )}
                       <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5 text-xs text-slate-400">
-                        <span>🕒 {isLive ? `Până la ${endDate}` : `Start: ${startDate}`}</span>
+                        <span>🕒 {isLive ? `Până la ${endDate}` : `Start: ${startDate}`} <span className="text-slate-500 text-[10px]">({tzShort})</span></span>
                         <span>👥 {c.registeredCount}{c.maxPlayers ? `/${c.maxPlayers}` : ''} înscriși</span>
                         {c.rounds.length > 0 && (
                           <span>🎯 {c.rounds.length} rondă{c.rounds.length > 1 ? 'e' : ''}</span>

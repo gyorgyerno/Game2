@@ -119,14 +119,22 @@ interface EloConfig {
 interface XpConfig { perWin: number; perLoss: number; perDraw: number; bonusTop3: number; }
 interface LeagueConfig { silver: number; gold: number; platinum: number; diamond: number; }
 interface UiConfig { aiAssistantEnabled: boolean; }
+interface AbandonPenaltyPerLevel { level: number; xpPenaltySolo: number; xpPenaltyMulti: number; }
+interface AbandonConfig {
+  enabled: boolean;
+  enabledGameTypes: string[];
+  penaltiesPerLevel: AbandonPenaltyPerLevel[];
+  autoBlockThreshold: number;
+  autoBlockEnabled: boolean;
+}
 interface SystemConfigLimits {
   elo: { kFactor: { min: number; max: number }; threshold: { min: number; max: number } };
   xp: { perWin: { min: number; max: number }; perLoss: { min: number; max: number }; perDraw: { min: number; max: number }; bonusTop3: { min: number; max: number } };
   league: { rating: { min: number; max: number } };
 }
 interface SystemConfigData {
-  elo: EloConfig; xp: XpConfig; league: LeagueConfig; ui: UiConfig;
-  defaults: { elo: EloConfig; xp: XpConfig; league: LeagueConfig; ui: UiConfig };
+  elo: EloConfig; xp: XpConfig; league: LeagueConfig; ui: UiConfig; abandon: AbandonConfig;
+  defaults: { elo: EloConfig; xp: XpConfig; league: LeagueConfig; ui: UiConfig; abandon: AbandonConfig };
   limits: SystemConfigLimits;
 }
 
@@ -362,8 +370,8 @@ export default function SettingsPage() {
             />
           </div>
 
-          {/* Right column: Bonus Challenges */}
-          <div style={{ position: 'sticky', top: 24 }}>
+          {/* Right column: Bonus Challenges + Abandon Penalties */}
+          <div style={{ position: 'sticky', top: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <BonusChallengesPanel
               gameType={game.gameType}
               gameName={game.name}
@@ -373,6 +381,16 @@ export default function SettingsPage() {
               onReload={load}
               showToast={showToast}
             />
+            {sysConfig && !sysLoadErr && (
+              <AbandonPenaltyPanel
+                key={game.gameType}
+                gameType={game.gameType}
+                sys={sysConfig}
+                allLevelConfigs={{ [game.gameType]: levelConfigs[game.gameType] ?? [] }}
+                onSaved={(data) => setSysConfig(data)}
+                showToast={showToast}
+              />
+            )}
           </div>
         </div>
       ))}
@@ -926,6 +944,252 @@ function UiSection({ sys, onSaved, showToast }: {
   );
 }
 
+// ─── AbandonPenaltyPanel ──────────────────────────────────────────────────────
+function AbandonPenaltyPanel({ gameType, sys, allLevelConfigs, onSaved, showToast }: {
+  gameType: string;
+  sys: SystemConfigData;
+  allLevelConfigs: Record<string, LevelConfig[]>;
+  onSaved: (data: SystemConfigData) => void;
+  showToast: (msg: string, type: 'ok' | 'err') => void;
+}) {
+  const abandon = sys.abandon ?? {
+    enabled: false, enabledGameTypes: [], penaltiesPerLevel: [], autoBlockThreshold: 5, autoBlockEnabled: false,
+  };
+
+  // Colectăm niveluri unice din toate jocurile, sortate
+  const allLevels: number[] = [...new Set(
+    Object.values(allLevelConfigs).flat().map((l) => l.level)
+  )].sort((a, b) => a - b);
+
+  // Seed penalties din DB sau default (0 pentru niveluri noi)
+  const seedPenalties = (levels: number[]): AbandonPenaltyPerLevel[] =>
+    levels.map((lvl) => {
+      const existing = abandon.penaltiesPerLevel.find((p) => p.level === lvl);
+      return existing ?? { level: lvl, xpPenaltySolo: 0, xpPenaltyMulti: 0 };
+    });
+
+  const [enabled, setEnabled] = useState((abandon.enabledGameTypes ?? []).includes(gameType));
+  const [autoBlockEnabled, setAutoBlockEnabled] = useState(abandon.autoBlockEnabled);
+  const [autoBlockThreshold, setAutoBlockThreshold] = useState(abandon.autoBlockThreshold);
+  const [penalties, setPenalties] = useState<AbandonPenaltyPerLevel[]>(() => seedPenalties(allLevels));
+  const [saving, setSaving] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
+
+  // Re-seed când se schimbă nivelurile sau config-ul din DB
+  const allLevelsKey = allLevels.join(',');
+  const abandonKey = JSON.stringify({
+    enabled: abandon.enabled,
+    enabledGameTypes: abandon.enabledGameTypes,
+    autoBlockEnabled: abandon.autoBlockEnabled,
+    autoBlockThreshold: abandon.autoBlockThreshold,
+    penaltiesPerLevel: abandon.penaltiesPerLevel,
+  });
+  useEffect(() => {
+    setEnabled((abandon.enabledGameTypes ?? []).includes(gameType));
+    setAutoBlockEnabled(abandon.autoBlockEnabled);
+    setAutoBlockThreshold(abandon.autoBlockThreshold);
+    setPenalties(seedPenalties(allLevels));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allLevelsKey, abandonKey, gameType]);
+
+  function updatePenalty(level: number, field: 'xpPenaltySolo' | 'xpPenaltyMulti', raw: string) {
+    const val = raw === '' ? 0 : Math.min(0, parseInt(raw, 10) || 0);
+    setPenalties((prev) => prev.map((p) => p.level === level ? { ...p, [field]: val } : p));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await adminApi.patch('/api/admin/system-config/abandon', {
+        gameType,
+        enabled,
+        autoBlockEnabled,
+        autoBlockThreshold,
+        penaltiesPerLevel: penalties,
+      });
+      const res = await adminApi.get('/api/admin/system-config');
+      onSaved(res.data);
+      showToast('Setări abandon salvate ✓', 'ok');
+    } catch {
+      showToast('Eroare la salvare', 'err');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleReset() {
+    try {
+      await adminApi.delete('/api/admin/system-config/abandon');
+      const res = await adminApi.get('/api/admin/system-config');
+      onSaved(res.data);
+      showToast('Penalizări abandon resetate la default ✓', 'ok');
+    } catch {
+      showToast('Eroare la reset', 'err');
+    }
+  }
+
+  return (
+    <div style={{ background: '#1a1d27', border: '1px solid #f9731644', borderRadius: 10, overflow: 'hidden' }}>
+      {/* Header */}
+      <div
+        onClick={() => setCollapsed((c) => !c)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 20px', background: '#f9731611',
+          borderBottom: collapsed ? 'none' : '1px solid #f9731633',
+          cursor: 'pointer', userSelect: 'none',
+        }}
+      >
+        <div>
+          <span style={{ fontWeight: 700, color: '#fb923c', fontSize: 16 }}>🚫 Penalizare Abandon</span>
+          <span style={{ fontSize: 12, color: '#64748b', marginLeft: 12 }}>
+            XP dedus când un jucător abandonează • Block automat la abuz
+          </span>
+        </div>
+        <span style={{
+          color: '#fb923c', fontSize: 12, display: 'inline-block',
+          transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s',
+        }}>▼</span>
+      </div>
+
+      {!collapsed && (
+      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* Toggle sistem */}
+        <label style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: '#0f1117', border: `1px solid ${enabled ? '#f9731644' : '#1e2535'}`,
+          borderRadius: 8, padding: '12px 14px', cursor: 'pointer',
+        }}>
+          <div>
+            <div style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600 }}>Activează sistemul de penalizări</div>
+            <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
+              {enabled ? '✓ Activ — se aplică penalizări XP la abandon' : 'Inactiv — abandon fără consecințe'}
+            </div>
+          </div>
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: '#f97316' }} />
+        </label>
+
+        {/* Tabel penalizări per nivel */}
+        <div style={{ background: '#0f1117', border: '1px solid #1e2535', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: '80px 1fr 1fr',
+            padding: '8px 14px', background: '#161922', borderBottom: '1px solid #1e2535',
+            fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
+          }}>
+            <span>Nivel</span>
+            <span>🎮 Solo (XP)</span>
+            <span>👥 Multiplayer (XP)</span>
+          </div>
+          {allLevels.length === 0 && (
+            <div style={{ padding: '16px 14px', color: '#475569', fontSize: 13 }}>
+              Nu există niveluri definite. Adaugă niveluri în 🎯 Manager Nivele mai întâi.
+            </div>
+          )}
+          {penalties.map((p) => (
+            <div key={p.level} style={{
+              display: 'grid', gridTemplateColumns: '80px 1fr 1fr',
+              padding: '8px 14px', borderBottom: '1px solid #1e253544', alignItems: 'center',
+            }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 32, height: 32, borderRadius: 6, background: '#1e2535',
+                color: '#94a3b8', fontWeight: 700, fontSize: 13,
+              }}>
+                {p.level}
+              </span>
+              <div style={{ paddingRight: 12 }}>
+                <input
+                  type="number" max={0} step={1}
+                  value={p.xpPenaltySolo === 0 ? '' : p.xpPenaltySolo}
+                  placeholder="0"
+                  onChange={(e) => updatePenalty(p.level, 'xpPenaltySolo', e.target.value)}
+                  style={{
+                    width: '100%', padding: '6px 10px', borderRadius: 6, boxSizing: 'border-box',
+                    background: '#1a1d27', border: `1px solid ${p.xpPenaltySolo < 0 ? '#f9731655' : '#374151'}`,
+                    color: p.xpPenaltySolo < 0 ? '#fb923c' : '#94a3b8', fontSize: 13,
+                  }}
+                />
+              </div>
+              <div>
+                <input
+                  type="number" max={0} step={1}
+                  value={p.xpPenaltyMulti === 0 ? '' : p.xpPenaltyMulti}
+                  placeholder="0"
+                  onChange={(e) => updatePenalty(p.level, 'xpPenaltyMulti', e.target.value)}
+                  style={{
+                    width: '100%', padding: '6px 10px', borderRadius: 6, boxSizing: 'border-box',
+                    background: '#1a1d27', border: `1px solid ${p.xpPenaltyMulti < 0 ? '#ef444455' : '#374151'}`,
+                    color: p.xpPenaltyMulti < 0 ? '#f87171' : '#94a3b8', fontSize: 13,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+          <div style={{ padding: '8px 14px', fontSize: 11, color: '#475569' }}>
+            Valorile trebuie să fie ≤ 0. Exemplu: -25 deduce 25 XP la abandon.
+          </div>
+        </div>
+
+        {/* Auto-block */}
+        <div style={{ background: '#0f1117', border: `1px solid ${autoBlockEnabled ? '#ef444433' : '#1e2535'}`, borderRadius: 8, padding: '14px' }}>
+          <label style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginBottom: 12,
+          }}>
+            <div>
+              <div style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600 }}>🔒 Auto-block la abuz</div>
+              <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
+                {autoBlockEnabled
+                  ? `Blocheaza automat după ${autoBlockThreshold} abandon-uri în 30 zile`
+                  : 'Inactiv — nu se blochează automat'}
+              </div>
+            </div>
+            <input type="checkbox" checked={autoBlockEnabled} onChange={(e) => setAutoBlockEnabled(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: '#ef4444' }} />
+          </label>
+
+          {autoBlockEnabled && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <label style={{ fontSize: 13, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                Block după
+              </label>
+              <input
+                type="number" min={1} max={100}
+                value={autoBlockThreshold}
+                onChange={(e) => setAutoBlockThreshold(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                style={{
+                  width: 80, padding: '6px 10px', borderRadius: 6,
+                  background: '#1a1d27', border: '1px solid #ef444455',
+                  color: '#f87171', fontSize: 14, fontWeight: 700, textAlign: 'center',
+                }}
+              />
+              <label style={{ fontSize: 13, color: '#94a3b8' }}>
+                abandon-uri / 30 zile
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* Save */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              padding: '9px 24px', borderRadius: 7, border: 'none', cursor: 'pointer',
+              background: '#f97316', color: '#fff', fontWeight: 700, fontSize: 14,
+              opacity: saving ? 0.6 : 1,
+            }}
+          >{saving ? 'Se salvează...' : '💾 Salvează'}</button>
+          <SmallBtn color="#dc2626" onClick={handleReset}>🔄 Reset default</SmallBtn>
+        </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
 // ─── EloSection ───────────────────────────────────────────────────────────────
 function EloSection({ sys, onSaved, showToast }: {
   sys: SystemConfigData;
@@ -1365,6 +1629,7 @@ function BonusChallengesPanel({
   showToast: (msg: string, type?: 'ok' | 'err') => void;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     gameType: gameType,
@@ -1435,19 +1700,31 @@ function BonusChallengesPanel({
   return (
     <div style={{ background: '#1a1d27', border: `1px solid ${primaryColor}44`, borderRadius: 12, overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 18px', background: `${primaryColor}11`, borderBottom: `1px solid ${primaryColor}33`,
-      }}>
+      <div
+        onClick={() => setCollapsed((c) => !c)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 18px', background: `${primaryColor}11`,
+          borderBottom: collapsed ? 'none' : `1px solid ${primaryColor}33`,
+          cursor: 'pointer', userSelect: 'none',
+        }}
+      >
         <div>
           <div style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 15 }}>🎁 Bonus Challenges</div>
           <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{gameName} — componente de recompensă</div>
         </div>
-        {!showForm && (
-          <SmallBtn color={primaryColor} onClick={() => setShowForm(true)}>+ Adaugă</SmallBtn>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={(e) => e.stopPropagation()}>
+          {!collapsed && !showForm && (
+            <SmallBtn color={primaryColor} onClick={() => setShowForm(true)}>+ Adaugă</SmallBtn>
+          )}
+          <span style={{
+            color: primaryColor, fontSize: 12, display: 'inline-block',
+            transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s',
+          }}>▼</span>
+        </div>
       </div>
 
+      {!collapsed && (<>
       {/* Create form */}
       {showForm && (
         <div style={{ padding: '14px 18px', borderBottom: `1px solid ${primaryColor}22`, background: `${primaryColor}08` }}>
@@ -1594,6 +1871,7 @@ function BonusChallengesPanel({
           </div>
         ))}
       </div>
+      </>)}
     </div>
   );
 }

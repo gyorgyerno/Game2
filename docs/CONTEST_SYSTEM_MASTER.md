@@ -1,3 +1,4 @@
+
 # Contest / Tournament System — Master Doc
 
 **Data implementare:** 31 martie 2026  
