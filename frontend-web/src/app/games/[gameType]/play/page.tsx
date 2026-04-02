@@ -55,9 +55,11 @@ function GamePlayPageInner({ params }: PageProps) {
   const [lastReaction, setLastReaction] = useState<{ userId: string; emoji: string; fromMe: boolean } | null>(null);
   const [latestMetrics, setLatestMetrics] = useState<Record<string, unknown> | undefined>(undefined);
   const [mazeSeed, setMazeSeed] = useState<number | undefined>(undefined);
+  const [mazeDifficulty, setMazeDifficulty] = useState<number | undefined>(undefined);
   const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
   const [mounted, setMounted] = useState(false);
   const mountTimeRef = useRef<number>(0);
+  const isRefreshingRef = useRef(false);
   const staticRules = GAME_RULES[canonicalGameType] || GAME_RULES['integrame'];
   const [serverTimeLimit, setServerTimeLimit] = useState<number>(staticRules.timeLimit);
 
@@ -71,6 +73,17 @@ function GamePlayPageInner({ params }: PageProps) {
       .then((r) => setServerTimeLimit(r.data.timeLimit))
       .catch(() => {});
   }, [canonicalGameType]);
+
+  useEffect(() => {
+    if (!isLabyrinth) return;
+    const currentLevel = (match?.level as GameLevel) || 1;
+    gamesApi.getLevels(canonicalGameType)
+      .then((r) => {
+        const cfg = r.data.find((l) => l.level === currentLevel);
+        if (cfg) setMazeDifficulty(cfg.difficultyValue);
+      })
+      .catch(() => {});
+  }, [isLabyrinth, canonicalGameType, match?.level]);
 
   useEffect(() => {
     gamesApi.getUiConfig()
@@ -208,9 +221,14 @@ function GamePlayPageInner({ params }: PageProps) {
 
     mountTimeRef.current = Date.now();
 
+    // Detectează refresh vs navigare voluntară
+    const handleBeforeUnload = () => { isRefreshingRef.current = true; };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
       heartbeatActive = false;
       clearInterval(heartbeatInterval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       socket.off('connect', handleReconnect);
       socket.off(SOCKET_EVENTS.MATCH_STATE);
       socket.off(SOCKET_EVENTS.MATCH_COUNTDOWN);
@@ -219,9 +237,9 @@ function GamePlayPageInner({ params }: PageProps) {
       socket.off(SOCKET_EVENTS.MATCH_FINISHED);
       socket.off('opponent_left');
       socket.off(SOCKET_EVENTS.REACTION_RECEIVED);
-      // Emit LEAVE_MATCH doar dacă componenta a trăit >500ms
-      // Previne React StrictMode double-mount să distrugă match-ul la montare
-      if (Date.now() - mountTimeRef.current > 500) {
+      // Emit LEAVE_MATCH doar dacă navigare voluntară (nu refresh)
+      // și componenta a trăit >500ms (protecție React StrictMode double-mount)
+      if (Date.now() - mountTimeRef.current > 500 && !isRefreshingRef.current) {
         socket.emit(SOCKET_EVENTS.LEAVE_MATCH, { matchId });
       }
     };
@@ -264,16 +282,21 @@ function GamePlayPageInner({ params }: PageProps) {
   }
 
   return (
-    <div className="game-page min-h-screen bg-white">
+    <div className={clsx('game-page min-h-screen', isLabyrinth ? 'text-white' : 'bg-white')} style={isLabyrinth ? {background:'#020617',minHeight:'100vh'} : {}}>
 
       {/* Overlay: generare puzzle AI */}
       {aiLoading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 text-center">
+          <div className={clsx('rounded-3xl shadow-2xl max-w-sm w-full p-8 text-center', isLabyrinth ? 'text-white' : 'bg-white text-gray-900')}
+            style={isLabyrinth ? {background:'rgba(8,20,40,0.92)',border:'1px solid rgba(34,211,238,0.18)',boxShadow:'0 0 48px rgba(6,182,212,0.12),0 24px 48px rgba(0,0,0,0.6)',backdropFilter:'blur(20px)'} : {}}>
             <div className="text-5xl mb-4">🤖</div>
-            <h2 className="text-xl font-extrabold text-gray-900 mb-2">Se generează puzzle-ul AI</h2>
-            <p className="text-gray-400 text-sm">O secundă, se creează întrebările...</p>
-            <div className={`mt-5 w-8 h-8 border-4 border-t-transparent rounded-full animate-spin mx-auto ${isLabyrinth ? 'border-emerald-500' : 'border-violet-500'}`} />
+            <h2 className={clsx('text-xl font-extrabold mb-2', isLabyrinth ? 'text-white' : 'text-gray-900')}>
+              {isLabyrinth ? 'Se generează labirintul' : 'Se generează puzzle-ul AI'}
+            </h2>
+            <p className={clsx('text-sm', isLabyrinth ? 'text-cyan-300/70' : 'text-gray-400')}>
+              {isLabyrinth ? 'O secundă, se construiește labirintul...' : 'O secundă, se crează întrebările...'}
+            </p>
+            <div className={`mt-5 w-8 h-8 border-4 border-t-transparent rounded-full animate-spin mx-auto ${isLabyrinth ? 'border-emerald-400' : 'border-violet-500'}`} />
           </div>
         </div>
       )}
@@ -281,12 +304,13 @@ function GamePlayPageInner({ params }: PageProps) {
       {/* Overlay: adversarul a abandonat */}
       {opponentLeft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 text-center">
+          <div className={clsx('rounded-3xl shadow-2xl max-w-sm w-full p-8 text-center', isLabyrinth ? 'text-white' : 'bg-white text-gray-900')}
+            style={isLabyrinth ? {background:'rgba(8,20,40,0.92)',border:'1px solid rgba(34,211,238,0.18)',boxShadow:'0 0 48px rgba(6,182,212,0.12),0 24px 48px rgba(0,0,0,0.6)',backdropFilter:'blur(20px)'} : {}}>
             <div className="text-5xl mb-4">🏆</div>
-            <h2 className="text-2xl font-extrabold text-gray-900 mb-2">Ai câștigat!</h2>
-            <p className="text-gray-500 text-sm mb-1">Adversarul a abandonat jocul.</p>
-            <p className="text-gray-400 text-xs">Se calculează rezultatele...</p>
-            <div className={`mt-5 w-8 h-8 border-4 border-t-transparent rounded-full animate-spin mx-auto ${isLabyrinth ? 'border-emerald-500' : 'border-violet-500'}`} />
+            <h2 className={clsx('text-2xl font-extrabold mb-2', isLabyrinth ? 'text-white' : 'text-gray-900')}>Ai câștigat!</h2>
+            <p className={clsx('text-sm mb-1', isLabyrinth ? 'text-slate-300' : 'text-gray-500')}>Adversarul a abandonat jocul.</p>
+            <p className={clsx('text-xs', isLabyrinth ? 'text-slate-500' : 'text-gray-400')}>Se calculează rezultatele...</p>
+            <div className={`mt-5 w-8 h-8 border-4 border-t-transparent rounded-full animate-spin mx-auto ${isLabyrinth ? 'border-emerald-400' : 'border-violet-500'}`} />
           </div>
         </div>
       )}
@@ -314,7 +338,7 @@ function GamePlayPageInner({ params }: PageProps) {
       <main className="pt-14 pl-[180px] min-h-screen flex flex-col items-center">
         {/* Countdown overlay */}
         {countdown !== null && (
-          <div className="fixed inset-0 z-50 bg-white/90 backdrop-blur-sm flex items-center justify-center">
+          <div className={clsx('fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm', isLabyrinth ? 'bg-black/70' : 'bg-white/90')}>
             <div className="text-center">
               <div className={clsx(
                 'text-[120px] font-black leading-none',
@@ -322,7 +346,7 @@ function GamePlayPageInner({ params }: PageProps) {
               )}>
                 {countdown === 0 ? '🚀' : countdown}
               </div>
-              <p className="text-gray-500 mt-4 text-lg font-medium">
+              <p className={clsx('mt-4 text-lg font-medium', isLabyrinth ? 'text-slate-300' : 'text-gray-500')}>
                 {countdown === 0 ? 'Start!' : 'Pregătește-te!'}
               </p>
             </div>
@@ -341,6 +365,7 @@ function GamePlayPageInner({ params }: PageProps) {
               isAI={isAI}
               allowInvite={allowInvite}
               linkCopied={linkCopied}
+              gameType={gameType}
               onCopyLink={() => {
                 const url = window.location.href;
                 navigator.clipboard.writeText(url).then(() => {
@@ -359,6 +384,7 @@ function GamePlayPageInner({ params }: PageProps) {
           level={level}
           puzzle={puzzle}
           mazeSeed={mazeSeed}
+          difficultyValue={isLabyrinth ? mazeDifficulty : undefined}
           onProgress={handleProgress}
           onFinish={handleFinish}
         />

@@ -27,18 +27,18 @@ export default function Navbar() {
 
   return (
     <nav
-      className="sticky top-0 z-50 border-b border-violet-300/20 backdrop-blur-xl"
-      style={{ backgroundColor: 'rgba(33, 3, 64, 0.88)' }}
+      className="sticky top-0 z-50 border-b border-slate-800 backdrop-blur-xl"
+      style={{ backgroundColor: 'rgba(2, 6, 23, 0.92)' }}
     >
       <div className="max-w-[1700px] mx-auto px-4 md:px-8 py-2">
         <div className="min-h-10 flex items-center justify-between gap-3">
-          <Link href="/dashboard" className="text-xl font-display font-bold text-violet-200">
+          <Link href="/dashboard" className="text-xl font-display font-bold text-emerald-400">
             🎯 Integrame
           </Link>
           <div className="flex items-center gap-2">
-            <Link href="/dashboard" className="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-violet-100 transition-colors hover:bg-white/20"><Home size={14} /></Link>
-            <Link href="/games/integrame/leaderboard" className="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-violet-100 transition-colors hover:bg-white/20"><Trophy size={14} /></Link>
-            <Link href="/profile#prieteni" className="relative inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-violet-100 transition-colors hover:bg-white/20">
+            <Link href="/dashboard" className="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-slate-700/60"><Home size={14} /></Link>
+            <Link href="/games/integrame/leaderboard" className="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-slate-700/60"><Trophy size={14} /></Link>
+            <Link href="/friends" className="relative inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-slate-700/60">
               <UserPlus size={14} />
               {pendingCount > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
@@ -51,13 +51,13 @@ export default function Navbar() {
                 <img
                   src={user.avatarUrl || `https://api.dicebear.com/8.x/bottts/svg?seed=${user.username}`}
                   alt={user.username}
-                  className="w-7 h-7 rounded-full border border-violet-300/60"
+                  className="w-7 h-7 rounded-full border border-slate-600"
                 />
                 <div className="hidden md:flex flex-col leading-tight">
-                  <Link href="/profile" className="text-[15px] font-semibold text-violet-100 hover:text-white transition-colors">
+                  <Link href="/profile" className="text-[15px] font-semibold text-slate-200 hover:text-white transition-colors">
                     {user.username}
                   </Link>
-                  <div className="text-[12px] text-violet-200/80 flex items-center gap-2 flex-wrap">
+                  <div className="text-[12px] text-slate-400 flex items-center gap-2 flex-wrap">
                     <span>{leagueLabel}</span>
                     <span>Rating ELO {user.rating}</span>
                     <span>Total XP {user.xp}</span>
@@ -72,8 +72,8 @@ export default function Navbar() {
         </div>
 
         {user && (
-          <div className="md:hidden mt-1 flex items-center justify-end gap-2 text-[11px] text-violet-200/85">
-            <Link href="/profile" className="font-semibold text-violet-100 hover:text-white transition-colors">
+          <div className="md:hidden mt-1 flex items-center justify-end gap-2 text-[11px] text-slate-400">
+            <Link href="/profile" className="font-semibold text-slate-200 hover:text-white transition-colors">
               {user.username}
             </Link>
             <span>•</span>

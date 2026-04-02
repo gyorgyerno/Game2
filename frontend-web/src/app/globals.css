@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --brand: 14 165 233;
+    --brand: 16 185 129;
   }
   html {
     background-color: #020617; /* slate-950 – previne flash alb la refresh */
@@ -46,4 +46,15 @@
   .badge-gold    { @apply badge bg-yellow-900 text-yellow-300; }
   .badge-platinum{ @apply badge bg-cyan-900 text-cyan-200; }
   .badge-diamond { @apply badge bg-blue-900 text-blue-300; }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

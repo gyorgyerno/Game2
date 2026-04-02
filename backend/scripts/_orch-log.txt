@@ -1,0 +1,15 @@
+﻿{"level":"info","matchId":"3afb9f3d-5af4-49ea-b30e-62e2d1c35a03","message":"[SimulatedMatchOrchestrator] skip","reason":"already_scheduled","timestamp":"2026-04-01T14:40:56.594Z"}
+{"level":"info","matchId":"3afb9f3d-5af4-49ea-b30e-62e2d1c35a03","message":"[SimulatedMatchOrchestrator] skip","reason":"bot_config_disabled","timestamp":"2026-04-01T14:40:58.075Z"}
+{"level":"info","matchId":"8fe652a7-7430-4801-91aa-aeab1715c682","message":"[SimulatedMatchOrchestrator] skip","reason":"already_scheduled","timestamp":"2026-04-01T14:41:03.437Z"}
+{"level":"info","matchId":"8fe652a7-7430-4801-91aa-aeab1715c682","message":"[SimulatedMatchOrchestrator] skip","reason":"bot_config_disabled","timestamp":"2026-04-01T14:41:04.681Z"}
+{"level":"info","matchId":"55002a8b-f5d4-44a9-a2c2-f4545643dd2a","message":"[SimulatedMatchOrchestrator] skip","reason":"bot_config_disabled","timestamp":"2026-04-01T14:45:49.700Z"}
+{"level":"info","matchId":"9f427549-5cc9-49a6-94b5-821adaf957e1","message":"[SimulatedMatchOrchestrator] skip","reason":"bot_config_disabled","timestamp":"2026-04-01T14:51:48.865Z"}
+{"level":"info","matchId":"6a2db31c-1101-4742-aea7-44dc6d31d689","message":"[SimulatedMatchOrchestrator] skip","reason":"bot_config_disabled","timestamp":"2026-04-01T14:55:34.419Z"}
+{"level":"info","matchId":"d9eb580d-1ab4-4a61-b2e1-8965e6717e49","message":"[SimulatedMatchOrchestrator] skip","reason":"bot_config_disabled","timestamp":"2026-04-01T15:03:08.026Z"}
+{"level":"info","matchId":"630c932e-ffda-443a-aa43-f5cde74e7313","message":"[SimulatedMatchOrchestrator] skip","reason":"match_not_found","timestamp":"2026-04-01T15:11:58.122Z"}
+{"level":"info","matchId":"b22d38c7-3013-41a8-9798-f8a215eafebb","message":"[SimulatedMatchOrchestrator] skip","reason":"match_not_found","timestamp":"2026-04-01T15:12:43.757Z"}
+{"level":"info","matchId":"71891f03-1aa1-49c7-928f-610b1ef08c14","message":"[SimulatedMatchOrchestrator] skip","reason":"match_not_found","timestamp":"2026-04-01T15:15:50.470Z"}
+{"level":"info","matchId":"bece3d68-7c21-4e36-b4fc-f6be55b4ff9c","message":"[SimulatedMatchOrchestrator] skip","reason":"match_not_found","timestamp":"2026-04-01T15:21:38.152Z"}
+{"level":"info","matchId":"8dffd69a-716e-4500-aee0-b4a0ab7211c4","message":"[SimulatedMatchOrchestrator] skip","reason":"match_not_found","timestamp":"2026-04-01T15:22:42.980Z"}
+{"level":"info","matchId":"9975f524-e60e-42f5-958f-6e3372fc0b9c","message":"[SimulatedMatchOrchestrator] skip","reason":"match_not_found","timestamp":"2026-04-01T15:27:01.770Z"}
+{"level":"info","matchId":"673bf32b-2610-4f3b-adee-d95a81951d78","message":"[SimulatedMatchOrchestrator] skip","reason":"match_not_found","timestamp":"2026-04-01T15:29:29.717Z"}

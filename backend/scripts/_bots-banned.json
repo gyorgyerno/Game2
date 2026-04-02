@@ -1,0 +1,132 @@
+{
+  "total": 13,
+  "banned": 0,
+  "enabled": 10,
+  "bannedUsers": [],
+  "allUsers": [
+    {
+      "id": "5937a06d-e4c7-4373-b9af-396fca565f0b",
+      "username": "PuzzleFox",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 3
+      }
+    },
+    {
+      "id": "887f3e27-3afb-4d52-8a9a-818b2651e7ee",
+      "username": "Andrei88",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 4
+      }
+    },
+    {
+      "id": "7d8f1a94-8e6e-439d-9ac9-253ca06ab5a9",
+      "username": "BrainStormer",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 5
+      }
+    },
+    {
+      "id": "f839904c-a683-4d04-9a13-9487ccdcd597",
+      "username": "MaraPlay",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 6
+      }
+    },
+    {
+      "id": "850f336d-d852-428a-8a3f-8589cbe5b842",
+      "username": "AlexX",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 7
+      }
+    },
+    {
+      "id": "b743bc95-a82f-4601-8fec-4e7990746b06",
+      "username": "MazeHunter",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 8
+      }
+    },
+    {
+      "id": "0691ef96-3b3c-4986-8976-a820b6356cab",
+      "username": "WordMaster",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 3
+      }
+    },
+    {
+      "id": "f44e53ba-640f-44b6-9dbb-be327fa442bc",
+      "username": "IonutPlay",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 4
+      }
+    },
+    {
+      "id": "e5f1c092-ec5d-4d6f-8530-8ba9335963e2",
+      "username": "RalucaGame",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 5
+      }
+    },
+    {
+      "id": "a5ce1ee3-80d5-4a65-9681-c343eb3524fb",
+      "username": "NexusMaze",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": false,
+        "skillLevel": 6
+      }
+    },
+    {
+      "id": "a3da562a-c493-44ff-a7d6-deb6aa52572c",
+      "username": "IronFox77",
+      "userType": "GHOST",
+      "isBanned": false,
+      "aiProfile": null
+    },
+    {
+      "id": "dca6e85d-3326-4fa2-890a-6354cd245577",
+      "username": "NexusMazedsd",
+      "userType": "SIMULATED",
+      "isBanned": false,
+      "aiProfile": {
+        "enabled": true,
+        "skillLevel": 5
+      }
+    },
+    {
+      "id": "97999120-25e4-49b7-8b0b-4001fbe21f6d",
+      "username": "DarkGrid57",
+      "userType": "GHOST",
+      "isBanned": false,
+      "aiProfile": null
+    }
+  ]
+}

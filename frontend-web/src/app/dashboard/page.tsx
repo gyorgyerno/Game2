@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Trophy, Play, ChevronDown, BookOpen, Star, Link2, Copy, Check, X, Lock } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
@@ -24,6 +24,7 @@ type PublicLevelConfig = {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const games = useGamesCatalog();
   const { user, fetchMe, token, _hasHydrated } = useAuthStore();
   const [selectedGame, setSelectedGame] = useState('integrame');
@@ -56,6 +57,9 @@ export default function DashboardPage() {
   const [soloDashMounted, setSoloDashMounted] = useState(false);
   const [activeContests, setActiveContests] = useState<any[]>([]);
   const [joiningContest, setJoiningContest] = useState<string | null>(null);
+
+  const requestedGameRaw = (searchParams.get('game') || '').toLowerCase();
+  const requestedGame = requestedGameRaw === 'maze' ? 'labirinturi' : requestedGameRaw;
 
   const AI_THEME_LABELS: Record<string, string> = {
     general: '🎲 General',
@@ -124,6 +128,15 @@ export default function DashboardPage() {
   }, [games, selectedGame]);
 
   useEffect(() => {
+    if (!requestedGame || games.length === 0) return;
+    const exists = games.some((g) => g.id === requestedGame);
+    if (exists && requestedGame !== selectedGame) {
+      setSelectedGame(requestedGame);
+      setSelectedLevel(1);
+    }
+  }, [requestedGame, games, selectedGame]);
+
+  useEffect(() => {
     if (games.length === 0) return;
     const exists = games.some((game) => game.id === selectedSoloGame);
     if (!exists) {
@@ -188,7 +201,7 @@ export default function DashboardPage() {
       });
   }, [showRandomAccept, randomAcceptSecondsLeft, pendingRandomMatchId]);
 
-  if (!_hasHydrated) return <div className="min-h-screen" style={{ backgroundColor: '#210340' }} />;
+  if (!_hasHydrated) return <div className="min-h-screen" style={{ background: '#020617' }} />;
 
   async function handlePlay() {
     setLoading(true);
@@ -335,7 +348,7 @@ export default function DashboardPage() {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
 
-  if (!user) return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#210340' }}><div className="w-8 h-8 border-2 border-violet-300 border-t-transparent rounded-full animate-spin" /></div>;
+  if (!user) return <div className="min-h-screen flex items-center justify-center" style={{ background: '#020617' }}><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>;
 
   // Level unlock logic: each level requires winsToUnlock wins at the previous level (configured in admin)
   const winsNeeded = (lvl: number) => levelUnlockConfig[lvl] ?? 5;
@@ -362,16 +375,16 @@ export default function DashboardPage() {
   const effectiveLevel = unlockedLevels.has(selectedLevel) ? selectedLevel : firstAvailableLevel;
   // Next level that is locked (to show requirement hint)
   const nextLockedLevel = availableLevels.slice(1).find((lvl) => !unlockedLevels.has(lvl));
-  const glassCard = 'rounded-[36px] border border-white/25 bg-white/12 backdrop-blur-xl shadow-[0_20px_60px_rgba(46,16,101,0.45)]';
-  const levelCard = 'rounded-[22px] border border-white bg-white hover:bg-white transition-all hover:scale-[1.02] min-h-[140px] md:min-h-[160px] flex flex-col items-center justify-center shadow-lg shadow-violet-950/20';
-  const lockedLevelCard = 'rounded-[22px] border border-white/40 bg-white/40 opacity-75 min-h-[120px] md:min-h-[130px] flex flex-col items-center justify-center';
+  const glassCard = 'rounded-[36px] border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.5)]';
+  const levelCard = 'rounded-[22px] border border-slate-700 bg-slate-800/80 hover:bg-slate-700/80 transition-all hover:scale-[1.02] min-h-[140px] md:min-h-[160px] flex flex-col items-center justify-center shadow-lg shadow-black/30';
+  const lockedLevelCard = 'rounded-[22px] border border-slate-700/50 bg-slate-800/40 opacity-60 min-h-[120px] md:min-h-[130px] flex flex-col items-center justify-center';
   const soloActionBtnBase = 'mt-4 md:mt-8 mx-auto w-full max-w-[170px] px-4 md:px-6 py-2.5 rounded-full text-[15px] font-semibold inline-flex items-center justify-center gap-2';
-  const soloPlayBtn = `${soloActionBtnBase} bg-violet-500 text-white hover:bg-violet-400`;
-  const soloDisabledBtn = `${soloActionBtnBase} bg-transparent border border-white text-white cursor-not-allowed`;
+  const soloPlayBtn = `${soloActionBtnBase} bg-emerald-600 text-white hover:bg-emerald-500`;
+  const soloDisabledBtn = `${soloActionBtnBase} bg-transparent border border-slate-600 text-slate-500 cursor-not-allowed`;
 
   return (
     <>
-      <div className="min-h-screen" style={{ backgroundColor: '#210340' }}>
+      <div className="min-h-screen" style={{ background: '#020617' }}>
       <Navbar />
       <main className="relative overflow-hidden max-w-[1700px] mx-auto px-3 md:px-8 py-8 md:py-10">
         <div className="space-y-8">
@@ -489,7 +502,7 @@ export default function DashboardPage() {
                   <select
                     value={selectedGame}
                     onChange={(e) => setSelectedGame(e.target.value)}
-                      className="input rounded-full appearance-none pr-8 text-[15px] bg-[#2a0a4a]/80 border-violet-300/30 focus:ring-violet-400"
+                      className="input rounded-full appearance-none pr-8 text-[15px] bg-slate-800/80 border-slate-600 text-white focus:ring-emerald-500"
                   >
                     {games.map((g) => (
                       <option key={g.id} value={g.id}>{g.emoji} {g.label}</option>
@@ -508,7 +521,7 @@ export default function DashboardPage() {
                       const lvl = parseInt(e.target.value, 10);
                       if (unlockedLevels.has(lvl)) setSelectedLevel(lvl);
                     }}
-                      className="input rounded-full appearance-none pr-8 text-[15px] bg-[#2a0a4a]/80 border-violet-300/30 focus:ring-violet-400"
+                      className="input rounded-full appearance-none pr-8 text-[15px] bg-slate-800/80 border-slate-600 text-white focus:ring-emerald-500"
                   >
                     {availableLevels.map((l) => (
                       <option key={l} value={l} disabled={!unlockedLevels.has(l)}>
@@ -531,7 +544,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
-              <div className="rounded-2xl border border-white/15 bg-white/5 px-3.5 py-4 flex flex-col items-center justify-center">
+              <div className="rounded-2xl border border-slate-700 bg-slate-800/50 px-3.5 py-4 flex flex-col items-center justify-center">
                 <span className="text-[11px] uppercase tracking-wide text-violet-200/80 font-semibold mb-2">Joc normal</span>
                 <span className="text-[15px] text-slate-300/80 mb-2 text-center">Intri rapid într-un meci cu alți jucători.</span>
                 <button onClick={() => { setShowAiThemes(false); setShowNormalConfirm(true); }} disabled={loading || aiLoading} className="inline-flex items-center justify-center gap-2 min-w-[190px] rounded-full px-8 py-3 text-[15px] font-semibold bg-violet-300 hover:bg-violet-200 text-slate-950 transition-colors disabled:opacity-70 shadow-md shadow-violet-400/30">
@@ -648,7 +661,7 @@ export default function DashboardPage() {
           </div>
 
           {selectedSoloGame === 'integrame' ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {(integrameSoloLevels.length > 0 ? integrameSoloLevels : [1,2,3,4,5].map((l) => ({ level: l, displayName: `Nivel ${l}`, winsToUnlock: 3, gamesPerLevel: 3, maxPlayers: 2 }))).map((cfg) => {
               const lvl = cfg.level;
               const gamesCount = cfg.gamesPerLevel ?? 3;
@@ -666,9 +679,9 @@ export default function DashboardPage() {
                     key={lvl}
                     className={`${lockedLevelCard} p-3 py-4 md:p-4 md:py-6 text-center`}
                   >
-                    <div className="text-[28px] font-black text-[#15141a]">{lvl}</div>
-                    <div className="text-[15px] text-[#15141a] mt-1">{cfg.displayName || `Nivel ${lvl}`}</div>
-                    <div className="text-[10px] text-slate-500 mt-1">{gamesCount} jocuri</div>
+                    <div className="text-[28px] font-black text-slate-500">{lvl}</div>
+                    <div className="text-[15px] text-slate-500 mt-1">{cfg.displayName || `Nivel ${lvl}`}</div>
+                    <div className="text-[10px] text-slate-600 mt-1">{gamesCount} jocuri</div>
                     <div className="mt-1.5 flex items-center gap-1 text-slate-600 text-[10px] font-semibold">
                       <Lock size={10} /> Blocat
                     </div>
@@ -677,7 +690,7 @@ export default function DashboardPage() {
                       disabled
                       className={soloDisabledBtn}
                     >
-                      <Lock size={14} className="text-white" />
+                      <Lock size={14} className="text-slate-500" />
                       Dezactivat
                     </button>
                   </div>
@@ -689,10 +702,10 @@ export default function DashboardPage() {
                   key={lvl}
                   className={`${levelCard} p-3 py-4 md:p-4 md:py-6 text-center group`}
                 >
-                  <div className="text-[28px] font-black text-[#15141a] group-hover:text-purple-600 transition-colors">
+                  <div className="text-[28px] font-black text-white group-hover:text-violet-400 transition-colors">
                     {lvl}
                   </div>
-                  <div className="text-[15px] text-[#15141a] mt-1">
+                  <div className="text-[15px] text-slate-300 mt-1">
                     {cfg.displayName || `Nivel ${lvl}`}
                   </div>
                   <div className="flex justify-center gap-1 mt-2">
@@ -718,7 +731,7 @@ export default function DashboardPage() {
             })}
           </div>
           ) : selectedSoloGame === 'labirinturi' ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
               {(mazeSoloLevels.length > 0 ? mazeSoloLevels : [1, 2, 3, 4, 5].map((level) => ({ level, displayName: `Nivel ${level}`, winsToUnlock: 5, gamesPerLevel: 4, maxPlayers: 2 }))).map((cfg) => {
                 const lvl = cfg.level;
                 const configuredGamesCount = cfg.gamesPerLevel ?? 4;
@@ -736,16 +749,16 @@ export default function DashboardPage() {
                       key={lvl}
                       className={`${lockedLevelCard} p-3 py-4 md:p-4 md:py-6 text-center`}
                     >
-                      <div className="text-[28px] font-black text-[#15141a]">{lvl}</div>
-                      <div className="text-[15px] text-[#15141a] mt-1">{cfg.displayName || `Nivel ${lvl}`}</div>
-                      <div className="text-[10px] text-slate-500 mt-1">{configuredGamesCount} jocuri</div>
+                      <div className="text-[28px] font-black text-slate-500">{lvl}</div>
+                      <div className="text-[15px] text-slate-500 mt-1">{cfg.displayName || `Nivel ${lvl}`}</div>
+                      <div className="text-[10px] text-slate-600 mt-1">{configuredGamesCount} jocuri</div>
                       <div className="text-[10px] mt-1.5 text-slate-600 font-semibold">🔒 Blocat</div>
                       <button
                         type="button"
                         disabled
                         className={soloDisabledBtn}
                       >
-                        <Lock size={14} className="text-white" />
+                        <Lock size={14} className="text-slate-500" />
                         Dezactivat
                       </button>
                     </div>
@@ -757,10 +770,10 @@ export default function DashboardPage() {
                     key={lvl}
                     className={`${levelCard} p-3 py-4 md:p-4 md:py-6 text-center group`}
                   >
-                    <div className="text-[28px] font-black text-[#15141a] group-hover:text-emerald-600 transition-colors">
+                    <div className="text-[28px] font-black text-white group-hover:text-emerald-400 transition-colors">
                       {lvl}
                     </div>
-                    <div className="text-[15px] text-[#15141a] mt-1">
+                    <div className="text-[15px] text-slate-300 mt-1">
                       {cfg.displayName || `Nivel ${lvl}`}
                     </div>
                     <div className="flex justify-center gap-1 mt-2">
@@ -823,7 +836,7 @@ export default function DashboardPage() {
 
       {showNormalConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-white/20 bg-[#1d0838] p-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-white">Alege cum vrei să joci</h3>
             <p className="mt-2 text-sm text-slate-300">Poți intra random sau poți genera un link pentru prieteni (expiră în 5 minute).</p>
             <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -860,7 +873,7 @@ export default function DashboardPage() {
 
       {showAiConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-amber-200/30 bg-[#2a1530] p-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-slate-900 p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-white">Cum vrei să joci puzzle-ul generat?</h3>
             <p className="mt-2 text-sm text-amber-100/85">
               Tema selectată: <span className="font-semibold text-amber-200">{AI_THEME_LABELS[aiTheme]}</span>
@@ -902,7 +915,7 @@ export default function DashboardPage() {
 
       {showRandomAccept && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-violet-200/30 bg-[#1d0838] p-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-white">Ai găsit un meci random</h3>
             <p className="mt-2 text-sm text-slate-300">Vrei să intri în acest joc?</p>
             <p className="mt-2 text-xs font-semibold text-amber-200">Timp rămas: {randomAcceptSecondsLeft ?? RANDOM_ACCEPT_TTL_SECONDS}s</p>

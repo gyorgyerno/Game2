@@ -119,6 +119,8 @@ export const statsApi = {
     api.get('/stats/solo/maze'),
   completeMazeSoloLevel: (level: number, score: number) =>
     api.post('/stats/solo/maze/complete', { level, score }),
+  getXpHistory: (gameType?: string) =>
+    api.get('/stats/xp-history', { params: { gameType } }),
 };
 
 // ─── AI ───────────────────────────────────────────────────────────────────────

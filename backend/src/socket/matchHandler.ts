@@ -18,6 +18,10 @@ const countdownStarted: Set<string> = new Set();
 // Tracker socket.id → matchId (pentru detectare disconnect)
 const socketMatchMap: Map<string, string> = new Map();
 const progressRateState: Map<string, { windowStart: number; count: number }> = new Map();
+// Grace period la disconnect: userId_matchId → timer handle
+// Dacă userul se reconectează în 12s, timer-ul e anulat și meciul continuă
+const reconnectGraceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+const RECONNECT_GRACE_MS = 12_000;
 const ghostEventBuffers: Map<string, Array<{ action: string; time: number; score?: number; correctAnswers?: number; mistakes?: number; wallHits?: number }>> = new Map();
 
 const PROGRESS_RATE_WINDOW_MS = 1000;
@@ -309,6 +313,14 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
       socket.emit(SOCKET_EVENTS.MATCH_STATE, match);
 
       if (match.status === 'active') {
+        // Anulează grace period dacă userul s-a reconectat după un disconnect/refresh
+        const graceKey = `${userId}_${matchId}`;
+        const pending = reconnectGraceTimers.get(graceKey);
+        if (pending) {
+          clearTimeout(pending);
+          reconnectGraceTimers.delete(graceKey);
+          logger.info(`[JOIN_MATCH] Reconectare în grace period — abandon anulat user=${userId} matchId=${matchId}`);
+        }
         logger.info(`[JOIN_MATCH] ACTIV → trimit MATCH_START direct user=${userId}`);
         const seed = isMazeGame(match.gameType) ? mazeSeedFromMatchId(match.id) : undefined;
         socket.emit(SOCKET_EVENTS.MATCH_START, { startedAt: match.startedAt, mazeSeed: seed, timeLimit: gameRegistry.getEffectiveRules(match.gameType, match.level)?.timeLimit ?? 0 });
@@ -556,11 +568,31 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
     const matchId = socketMatchMap.get(socket.id);
     socketMatchMap.delete(socket.id);
     progressRateState.delete(socket.id);
-    if (matchId) {
-      // La disconnect temporar NU atingem matching-urile in 'waiting' —
-      // cleanup-ul periodic (15 min) se ocupa de ele; botii pot intra intre timp
-      handlePlayerLeft(io, userId, matchId, false).catch(() => {});
-    }
+    if (!matchId) return;
+
+    // Verifică rapid statusul meciului: dacă e activ, acordă grace period de 12s
+    // pentru reconectare (refresh, reconectare rețea) înainte de a trata ca abandon
+    prisma.match.findUnique({ where: { id: matchId }, select: { status: true } })
+      .then((m) => {
+        if (m?.status === 'active' || m?.status === 'countdown') {
+          const graceKey = `${userId}_${matchId}`;
+          // Evită duplicate grace timers (poate fi un al doilea socket)
+          if (reconnectGraceTimers.has(graceKey)) return;
+          logger.info(`[DISCONNECT] Grace period ${RECONNECT_GRACE_MS}ms pentru user=${userId} matchId=${matchId}`);
+          const t = setTimeout(() => {
+            reconnectGraceTimers.delete(graceKey);
+            logger.info(`[DISCONNECT] Grace period expirat — abandon user=${userId} matchId=${matchId}`);
+            handlePlayerLeft(io, userId, matchId, false).catch(() => {});
+          }, RECONNECT_GRACE_MS);
+          reconnectGraceTimers.set(graceKey, t);
+        } else {
+          // Meci în waiting sau altă stare — comportamentul existent
+          handlePlayerLeft(io, userId, matchId, false).catch(() => {});
+        }
+      })
+      .catch(() => {
+        handlePlayerLeft(io, userId, matchId, false).catch(() => {});
+      });
   });
 }
 

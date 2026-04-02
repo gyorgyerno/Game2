@@ -598,17 +598,45 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
 
   return (
     <div className="flex flex-col items-center gap-6 px-4 pb-24 w-full max-w-5xl">
-      {/* Stat cards — dark gaming */}
+      {/* Stat cards — Liquid Glass iOS 26 */}
       <div className="w-full max-w-3xl grid grid-cols-4 gap-2 text-sm">
-        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-emerald-400 font-semibold">👣 Pași: {steps}</div>
-        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-amber-400 font-semibold">⭐ Bonusuri: {collected}</div>
-        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-rose-400 font-semibold">🧱 Pereți: {wallHits}</div>
-        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-violet-400 font-semibold">🎯 Nivel: {level}</div>
+        <div className="rounded-2xl px-3 py-2.5 flex items-center gap-1.5 backdrop-blur-md"
+          style={{background:'rgba(16,185,129,0.07)',border:'1px solid rgba(52,211,153,0.18)',boxShadow:'0 4px 16px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)'}}>
+          <span>👣</span><span className="text-slate-400 font-normal text-sm">Pași</span>
+          <span className="ml-auto tabular-nums font-bold text-emerald-300">{steps}</span>
+        </div>
+        <div className="rounded-2xl px-3 py-2.5 flex items-center gap-1.5 backdrop-blur-md"
+          style={{background:'rgba(245,158,11,0.07)',border:'1px solid rgba(251,191,36,0.18)',boxShadow:'0 4px 16px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)'}}>
+          <span>⭐</span><span className="text-slate-400 font-normal text-sm">Bonus</span>
+          <span className="ml-auto tabular-nums font-bold text-amber-300">{collected}</span>
+        </div>
+        <div className="rounded-2xl px-3 py-2.5 flex flex-col gap-0.5 backdrop-blur-md"
+          style={{background: shouldPenalizeWalls ? 'rgba(239,68,68,0.10)' : 'rgba(239,68,68,0.07)',border: shouldPenalizeWalls ? '1px solid rgba(252,165,165,0.28)' : '1px solid rgba(252,165,165,0.18)',boxShadow:'0 4px 16px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)'}}>
+          <div className="flex items-center gap-1.5">
+            <span>🧱</span><span className="text-slate-400 font-normal text-sm">Pereți</span>
+            <span className="ml-auto tabular-nums font-bold text-rose-300">{wallHits}</span>
+          </div>
+          <span className="text-[10px] leading-tight" style={{color: shouldPenalizeWalls ? 'rgba(252,165,165,0.7)' : 'rgba(134,239,172,0.6)'}}>
+            {shouldPenalizeWalls ? '−scor' : 'fără penalizare'}
+          </span>
+        </div>
+        <div className="rounded-2xl px-3 py-2.5 flex items-center gap-1.5 backdrop-blur-md"
+          style={{background:'rgba(139,92,246,0.07)',border:'1px solid rgba(167,139,250,0.18)',boxShadow:'0 4px 16px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.10)'}}>
+          <span>🎯</span><span className="text-slate-400 font-normal text-sm">Nivel</span>
+          <span className="ml-auto tabular-nums font-bold text-violet-300">{level}</span>
+        </div>
       </div>
 
       <div
-        className="relative w-fit bg-slate-950 border-2 border-cyan-900/50 rounded-3xl p-4 select-none touch-none shadow-[0_0_48px_rgba(6,182,212,0.18)]"
-        style={{ cursor: started && !finished ? 'crosshair' : 'default' }}
+        className="relative w-fit rounded-[32px] select-none touch-none"
+        style={{
+          padding: '28px',
+          background: 'linear-gradient(135deg,#0c1a2e 0%,#0a2020 100%)',
+          border: '1.5px solid rgba(34,211,238,0.18)',
+          boxShadow: '0 0 72px rgba(6,182,212,0.14),0 24px 64px rgba(0,0,0,0.65),inset 0 1px 0 rgba(34,211,238,0.14)',
+          backdropFilter: 'blur(2px)',
+          cursor: started && !finished ? 'crosshair' : 'default',
+        }}
         onMouseDown={(e) => {
           if (!started || finished) return;
           e.preventDefault();
@@ -740,31 +768,27 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
           height={mazeSize * cellSize}
           style={{
             position: 'absolute',
-            top: '1rem', // padding-ul containerului
-            left: '1rem',
+            top: '28px',
+            left: '28px',
             pointerEvents: 'none',
           }}
         />
 
-        <div className="mt-3 text-center text-sm text-cyan-400/80 font-medium">
+        <div className="mt-3 text-center text-xs tracking-wide" style={{color:'rgba(34,211,238,0.5)',letterSpacing:'0.03em'}}>
           {started && !finished
             ? 'Controlează bila cu săgeți, swipe sau drag între celule vecine.'
             : 'Așteaptă startul meciului pentru a începe.'}
         </div>
       </div>
 
-      <div className="text-xs text-slate-500 text-center max-w-xl">
-        {shouldPenalizeWalls
-          ? 'Nivel dificil: lovirea pereților scade scorul.'
-          : 'Nivel accesibil: lovirea pereților nu scade scorul.'}
-      </div>
-
-      <div className="grid grid-cols-3 gap-2 w-[220px]">
+      <div className="grid grid-cols-3 gap-2 w-[220px] p-3 rounded-[28px]"
+        style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.09)',boxShadow:'0 8px 32px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.08)',backdropFilter:'blur(12px)'}}>
         <div />
         <button
           onClick={() => injectDirection('up')}
           disabled={!started || finished}
-          className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
+          className="rounded-2xl px-3 py-2.5 text-base font-bold text-cyan-300 disabled:opacity-25 transition-all duration-75 active:scale-90 select-none"
+          style={{background:'rgba(34,211,238,0.08)',border:'1px solid rgba(34,211,238,0.2)',boxShadow:'0 4px 12px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.15)'}}
         >
           ↑
         </button>
@@ -772,17 +796,20 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
         <button
           onClick={() => injectDirection('left')}
           disabled={!started || finished}
-          className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
+          className="rounded-2xl px-3 py-2.5 text-base font-bold text-cyan-300 disabled:opacity-25 transition-all duration-75 active:scale-90 select-none"
+          style={{background:'rgba(34,211,238,0.08)',border:'1px solid rgba(34,211,238,0.2)',boxShadow:'0 4px 12px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.15)'}}
         >
           ←
         </button>
-        <div className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-500 text-center">
-          ●
+        <div className="rounded-2xl px-3 py-2 flex items-center justify-center"
+          style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)',color:'rgba(148,163,184,0.35)',fontSize:18}}>
+          ⊕
         </div>
         <button
           onClick={() => injectDirection('right')}
           disabled={!started || finished}
-          className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
+          className="rounded-2xl px-3 py-2.5 text-base font-bold text-cyan-300 disabled:opacity-25 transition-all duration-75 active:scale-90 select-none"
+          style={{background:'rgba(34,211,238,0.08)',border:'1px solid rgba(34,211,238,0.2)',boxShadow:'0 4px 12px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.15)'}}
         >
           →
         </button>
@@ -790,7 +817,8 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
         <button
           onClick={() => injectDirection('down')}
           disabled={!started || finished}
-          className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
+          className="rounded-2xl px-3 py-2.5 text-base font-bold text-cyan-300 disabled:opacity-25 transition-all duration-75 active:scale-90 select-none"
+          style={{background:'rgba(34,211,238,0.08)',border:'1px solid rgba(34,211,238,0.2)',boxShadow:'0 4px 12px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.15)'}}
         >
           ↓
         </button>

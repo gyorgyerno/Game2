@@ -1,0 +1,8 @@
+{
+  "match": null,
+  "botConfig": {
+    "id": "default-bot-config",
+    "enabled": true,
+    "maxBotsOnline": 8
+  }
+}

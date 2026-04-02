@@ -4,6 +4,7 @@ import { Plus, Lock, Copy, Check } from 'lucide-react';
 import { MatchPlayer } from '@integrame/shared';
 import { invitesApi } from '@/lib/api';
 import clsx from 'clsx';
+import { isLabyrinthGameType } from '@/games/registry';
 
 const FRIEND_INVITE_TTL_SECONDS = 300;
 
@@ -23,6 +24,7 @@ const INITIALS_BG = [
 ];
 
 export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, level, myUserId, allowInvite = false }: Props) {
+  const isMaze = isLabyrinthGameType(gameType);
   const [inviteUrl, setInviteUrl] = useState('');
   const [copied, setCopied] = useState(false);
   const [showInvitePanel, setShowInvitePanel] = useState(false);
@@ -103,7 +105,11 @@ export default function PlayerSidebar({ players, maxPlayers, matchId, gameType, 
   });
 
   return (
-    <aside className="fixed left-0 top-14 bottom-0 w-[180px] border-r border-gray-100 bg-white flex flex-col items-center pt-4 pb-6 gap-3 overflow-y-auto z-30">
+    <aside className={`fixed left-0 top-14 bottom-0 w-[180px] flex flex-col items-center pt-4 pb-6 gap-3 overflow-y-auto z-30 ${
+      isMaze
+        ? 'bg-[#020617] border-r border-slate-800'
+        : 'bg-white border-r border-gray-100'
+    }`}>
       {/* Invite label */}
       {allowInvite && (
         <div className="text-[10px] text-center text-gray-400 font-medium px-2 leading-tight">

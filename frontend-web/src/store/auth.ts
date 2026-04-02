@@ -39,8 +39,12 @@ export const useAuthStore = create<AuthState>()(
         try {
           const { data } = await usersApi.getMe();
           set({ user: data });
-        } catch {
-          set({ token: null, user: null });
+        } catch (err: any) {
+          // Deloghează DOAR dacă serverul spune explicit că token-ul e invalid
+          if (err?.response?.status === 401) {
+            set({ token: null, user: null });
+          }
+          // Altfel (network error, 500, etc.) păstrăm sesiunea
         } finally {
           set({ isLoading: false });
         }

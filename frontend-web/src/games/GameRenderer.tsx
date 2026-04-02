@@ -13,14 +13,15 @@ import { getGameByType } from './registry';
  */
 interface GameRendererProps extends GamePlayProps {
   gameType: string;
+  difficultyValue?: number;
 }
 
-export default function GameRenderer({ gameType, ...props }: GameRendererProps) {
+export default function GameRenderer({ gameType, difficultyValue, ...props }: GameRendererProps) {
   const gameDef = getGameByType(gameType);
 
   switch (gameDef?.uiVariant) {
     case 'maze':
-      return <MazePlay {...props} />;
+      return <MazePlay {...props} difficultyValue={difficultyValue} />;
     default:
       return <IntegramePlay {...props} />;
   }

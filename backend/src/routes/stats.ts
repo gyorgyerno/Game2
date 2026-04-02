@@ -159,6 +159,48 @@ router.post('/solo/maze/complete', requireAuth, async (req: AuthRequest, res: Re
   return res.json({ ok: true, level, bestScore: updated.bestScore });
 });
 
+// GET /api/stats/xp-history?gameType=integrame
+router.get('/xp-history', requireAuth, async (req: AuthRequest, res: Response) => {
+  const { gameType } = req.query;
+
+  // 'labirinturi' și 'maze' sunt același joc
+  let gameTypeFilter: string | { in: string[] } | undefined;
+  if (gameType === 'labirinturi') {
+    gameTypeFilter = { in: ['labirinturi', 'maze'] };
+  } else if (gameType) {
+    gameTypeFilter = gameType as string;
+  }
+
+  const players = await prisma.matchPlayer.findMany({
+    where: {
+      userId: req.userId,
+      xpGained: { gt: 0 },
+      match: {
+        status: 'finished',
+        ...(gameTypeFilter ? { gameType: gameTypeFilter } : {}),
+      },
+    },
+    include: {
+      match: { select: { finishedAt: true, gameType: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  let cumulative = 0;
+  const history = players
+    .filter((p) => p.match.finishedAt)
+    .map((p) => {
+      cumulative += p.xpGained;
+      return {
+        date: p.match.finishedAt!.toISOString(),
+        xp: cumulative,
+        gained: p.xpGained,
+      };
+    });
+
+  return res.json({ history, total: cumulative });
+});
+
 // GET /api/stats/:userId?gameType=integrame&level=1
 router.get('/:userId', async (req: Request, res: Response) => {
   const { gameType, level } = req.query;

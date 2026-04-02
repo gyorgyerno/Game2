@@ -1,5 +1,6 @@
 import type { Match, MatchPlayer } from '@integrame/shared';
 import type { FrontendGameDefinition } from '@/games/registry';
+import { isLabyrinthGameType } from '@/games/registry';
 
 type MatchPlayerWithUser = MatchPlayer & { user?: { username: string; avatarUrl?: string } };
 
@@ -11,6 +12,7 @@ interface GameLobbyPanelProps {
   allowInvite: boolean;
   linkCopied: boolean;
   onCopyLink: () => void;
+  gameType?: string;
 }
 
 // Mapare culoare → clase Tailwind (necesare pentru purge CSS să includă clasele)
@@ -64,41 +66,26 @@ export default function GameLobbyPanel({
   allowInvite,
   linkCopied,
   onCopyLink,
+  gameType,
 }: GameLobbyPanelProps) {
   const accent = ACCENT_MAP[gameDef?.accentColor ?? 'violet'];
   const playerCount = match?.players.length ?? 0;
   const allReady = playerCount >= maxPlayers;
+  const isMaze = isLabyrinthGameType(gameType ?? '');
 
   return (
     <div className="flex flex-col items-center gap-4 w-full max-w-sm">
 
-      {/* ── Titlu joc ── */}
-      <div className="flex items-center gap-3">
-        <span className="text-4xl">{gameDef?.emoji ?? '🎮'}</span>
-        <div>
-          <h2 className="text-xl font-black text-gray-800">{gameDef?.label ?? 'Joc'}</h2>
-          {gameDef?.howToPlay && (
-            <p className="text-xs text-gray-500 max-w-[220px] leading-snug">{gameDef.howToPlay}</p>
-          )}
-        </div>
-      </div>
 
-      {/* ── Badge-uri ── */}
-      <div className="flex flex-wrap justify-center gap-2">
-        {isAI && (
-          <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${accent.badge}`}>
-            🤖 Puzzle generat de AI
-          </span>
-        )}
-        {gameDef?.controlsHint && (
-          <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${accent.badge}`}>
-            🎮 {gameDef.controlsHint}
-          </span>
-        )}
-      </div>
+
+
 
       {/* ── Așteptare jucători ── */}
-      <div className={`w-full rounded-2xl border ${accent.border} bg-white/70 px-5 py-4 flex flex-col items-center gap-3`}>
+      <div className={`w-full rounded-2xl border px-5 py-4 flex flex-col items-center gap-3 ${
+        isMaze
+          ? 'border-slate-700 bg-slate-800/60 backdrop-blur-md'
+          : `${accent.border} bg-white/70`
+      }`}>
         {/* Indicatori jucători */}
         <div className="flex items-center gap-3">
           {Array.from({ length: maxPlayers }).map((_, i) => (
@@ -106,11 +93,13 @@ export default function GameLobbyPanel({
               <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-2 transition-all ${
                 i < playerCount
                   ? `border-transparent ${accent.dot} text-white`
-                  : 'border-dashed border-gray-300 bg-gray-50 text-gray-300'
+                  : isMaze
+                    ? 'border-dashed border-slate-600 bg-slate-700/50 text-slate-500'
+                    : 'border-dashed border-gray-300 bg-gray-50 text-gray-300'
               }`}>
                 {i < playerCount ? ((match?.players[i]?.user?.username || match?.players[i]?.username || '?')[0]?.toUpperCase() ?? '?') : '?'}
               </div>
-              <span className="text-xs text-gray-400">
+              <span className={`text-xs ${isMaze ? 'text-slate-400' : 'text-gray-400'}`}>
                 {i < playerCount ? (match?.players[i]?.user?.username || match?.players[i]?.username || '…') : '—'}
               </span>
             </div>
@@ -126,18 +115,22 @@ export default function GameLobbyPanel({
           <div className="flex flex-col items-center gap-1">
             <div className="flex items-center gap-2">
               <span className={`inline-block w-2 h-2 rounded-full animate-pulse ${accent.dot}`} />
-              <p className="text-sm text-gray-500 font-medium">
+              <p className={`text-sm font-medium ${isMaze ? 'text-slate-300' : 'text-gray-500'}`}>
                 Se așteaptă jucători… ({playerCount}/{maxPlayers})
               </p>
             </div>
-            <p className="text-xs text-gray-400">Meciul pornește automat când sunt toți prezenți</p>
+            <p className={`text-xs ${isMaze ? 'text-slate-500' : 'text-gray-400'}`}>Meciul pornește automat când sunt toți prezenți</p>
           </div>
         )}
       </div>
 
       {/* ── Info nivel ── */}
       {match && (
-        <div className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+        <div className={`flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full border ${
+          isMaze
+            ? 'bg-slate-800/80 text-slate-400 border-slate-700'
+            : 'bg-slate-100 text-slate-500 border-slate-200'
+        }`}>
           🎯 Nivel {match.level} · max {maxPlayers} jucători · celălalt jucător trebuie să selecteze același nivel
         </div>
       )}

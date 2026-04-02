@@ -1,0 +1,8 @@
+{
+  "current": {
+    "id": "default-bot-config",
+    "enabled": true,
+    "maxBotsOnline": 8
+  },
+  "alreadyEnabled": true
+}
