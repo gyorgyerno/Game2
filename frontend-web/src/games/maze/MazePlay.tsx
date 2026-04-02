@@ -1,6 +1,15 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GamePlayProps } from '../IGameUI';
+import {
+  type BallState,
+  type InputMap,
+  type TrailPoint,
+  drawBall,
+  resolveCollisions,
+  stepPhysics,
+  stepPhysicsWithDir,
+} from './MazeBallPhysics';
 
 type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -233,6 +242,33 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingProgressRef = useRef<{ correct: number; mistakes: number; metrics: Record<string, unknown> } | null>(null);
 
+  // ─── Refs fizică bilă ────────────────────────────────────────────────────────
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const keysRef   = useRef<InputMap>({});
+  const ballRef   = useRef<BallState>({ x: 0, y: 0, vx: 0, vy: 0 });
+  const trailRef  = useRef<TrailPoint[]>([]);
+  const rafRef    = useRef<number>(0);
+  const lastTimeRef = useRef<number>(0);
+  // 1.0 = normal, scade la 0.92 la coliziune, revine la 1.0 în ~120ms
+  const wallFlashScaleRef  = useRef<number>(1);
+  const wallFlashTargetRef = useRef<number>(1);
+  // Mouse drag control
+  const isDraggingRef   = useRef(false);
+  const mouseDirRef     = useRef<{ ax: number; ay: number; power: number } | null>(null);
+  const mouseOriginRef  = useRef<{ x: number; y: number } | null>(null); // punct fix = unde s-a dat click
+
+  // Stare internă a bilei pentru logica de joc (celulă curentă, coliziuni cu bonusuri etc.)
+  const gameStateRef = useRef({
+    player: start,
+    wallHits: 0,
+    steps: 0,
+    collected: 0,
+    checkpoint: null as Position | null,
+    visited: new Set([keyOf(start)]),
+    bonuses: [] as Position[],
+    finished: false,
+  });
+
   const FLUSH_PROGRESS_MS = 120;
 
   useEffect(() => {
@@ -253,7 +289,23 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
     setWallHits(0);
     setCheckpoint(null);
     setVisited(new Set([keyOf(start)]));
-  }, [bonusCount, activeCells, start, exit]);
+
+    // Reset stare internă fizică
+    const startPx = start.col * cellSize + cellSize / 2;
+    const startPy = start.row * cellSize + cellSize / 2;
+    ballRef.current  = { x: startPx, y: startPy, vx: 0, vy: 0 };
+    trailRef.current = [];
+    gameStateRef.current = {
+      player: start,
+      wallHits: 0,
+      steps: 0,
+      collected: 0,
+      checkpoint: null,
+      visited: new Set([keyOf(start)]),
+      bonuses: nextBonuses,
+      finished: false,
+    };
+  }, [bonusCount, activeCells, start, exit, cellSize]);
 
   const emitProgress = useCallback((nextSteps: number, nextWallHits: number, nextCollected: number, nextVisited: Set<string>) => {
     const progressPoints = Math.max(1, nextSteps + nextCollected * 4);
@@ -292,112 +344,63 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
     onProgress(pending.correct, pending.mistakes, pending.metrics);
   }
 
-  const getNextPos = useCallback((from: Position, dir: Direction): Position => {
-    if (dir === 'up') return { row: from.row - 1, col: from.col };
-    if (dir === 'right') return { row: from.row, col: from.col + 1 };
-    if (dir === 'down') return { row: from.row + 1, col: from.col };
-    return { row: from.row, col: from.col - 1 };
-  }, []);
-
-  const canMove = useCallback((from: Position, dir: Direction): boolean => {
-    const cell = maze[from.row][from.col];
-    const nextPos = getNextPos(from, dir);
-    if (!activeMap[nextPos.row]?.[nextPos.col]) return false;
-    if (dir === 'up') return !cell.top;
-    if (dir === 'right') return !cell.right;
-    if (dir === 'down') return !cell.bottom;
-    return !cell.left;
-  }, [activeMap, maze, getNextPos]);
-
-  const move = useCallback((dir: Direction) => {
-    if (!started || finished) return;
-
-    if (!canMove(player, dir)) {
-      const nextWallHits = wallHits + 1;
-      setWallHits(nextWallHits);
-      setWallFlash(true);
-      setTimeout(() => setWallFlash(false), 160);
-      emitProgress(steps, nextWallHits, collected, visited);
-      return;
-    }
-
-    const next = getNextPos(player, dir);
-    const nextSteps = steps + 1;
-    const nextVisited = new Set(visited);
-    nextVisited.add(keyOf(next));
-
-    let nextCollected = collected;
-    const nextBonuses = bonuses.filter((b) => {
-      const isHit = b.row === next.row && b.col === next.col;
-      if (isHit) nextCollected += 1;
-      return !isHit;
-    });
-
-    setBonuses(nextBonuses);
-    setPlayer(next);
-    setSteps(nextSteps);
-    setVisited(nextVisited);
-
-    if (!checkpoint && nextVisited.size >= Math.floor(activeCellCount / 3)) {
-      setCheckpoint(next);
-    }
-
-    emitProgress(nextSteps, wallHits, nextCollected, nextVisited);
-    setCollected(nextCollected);
-
-    if (next.row === exit.row && next.col === exit.col) {
-      flushProgressNow();
-      const finalCorrect = Math.max(1, nextSteps + nextCollected * 6);
-      const finalMistakes = shouldPenalizeWalls ? wallHits : 0;
-      onFinish(finalCorrect, finalMistakes, {
-        steps: nextSteps,
-        wallHits,
-        bonusesCollected: nextCollected,
-        usedCheckpoint: !!checkpoint,
-      });
-    }
-  }, [
-    started,
-    finished,
-    canMove,
-    player,
-    wallHits,
-    steps,
-    collected,
-    visited,
-    checkpoint,
-    mazeSize,
-    activeCellCount,
-    exit.row,
-    exit.col,
-    shouldPenalizeWalls,
-    bonuses,
-    emitProgress,
-    getNextPos,
-    onFinish,
-  ]);
-
+  // ─── Input: keydown/keyup map ────────────────────────────────────────────────
   useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'ArrowUp') move('up');
-      if (e.key === 'ArrowRight') move('right');
-      if (e.key === 'ArrowDown') move('down');
-      if (e.key === 'ArrowLeft') move('left');
-    }
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [move]);
-
-  useEffect(() => {
-    return () => {
-      if (progressTimerRef.current) {
-        clearTimeout(progressTimerRef.current);
-        progressTimerRef.current = null;
+    const onDown = (e: KeyboardEvent) => {
+      const tracked = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','W','A','S','D'];
+      if (tracked.includes(e.key)) {
+        e.preventDefault();
+        keysRef.current[e.key] = true;
       }
+    };
+    const onUp = (e: KeyboardEvent) => { keysRef.current[e.key] = false; };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
     };
   }, []);
 
+  // ─── Mouse drag control ──────────────────────────────────────────────────────
+  // Virtual joystick: direcția = normalize(mousePos - clickOrigin)
+  // Punct de referință FIX (unde s-a dat click), nu bila. Elimină zig-zag-ul.
+  const JOYSTICK_MAX_RADIUS = 40; // px de drag = 100% accelerație
+
+  function updateMouseDir(clientX: number, clientY: number) {
+    if (!canvasRef.current || !mouseOriginRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const dx = mx - mouseOriginRef.current.x;
+    const dy = my - mouseOriginRef.current.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    // Dead zone: trebuie să tragi cel puțin 8px din punctul de click
+    if (dist < 8) { mouseDirRef.current = null; return; }
+    // power = cât de mult ai tras (0 la dead-zone-edge .. 1 la JOYSTICK_MAX_RADIUS+)
+    const power = Math.min(dist / JOYSTICK_MAX_RADIUS, 1);
+    mouseDirRef.current = { ax: dx / dist, ay: dy / dist, power };
+  }
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      updateMouseDir(e.clientX, e.clientY);
+    };
+    const onUp = () => {
+      isDraggingRef.current = false;
+      mouseDirRef.current = null;
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── Touch: swipe rapid → injectăm direcție în keysRef ──────────────────────
   function onTouchStart(event: React.TouchEvent<HTMLDivElement>) {
     const touch = event.touches[0];
     if (!touch) return;
@@ -409,23 +412,188 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
     if (!startPoint) return;
     const touch = event.changedTouches[0];
     if (!touch) return;
-
     const dx = touch.clientX - startPoint.x;
     const dy = touch.clientY - startPoint.y;
-    const absX = Math.abs(dx);
-    const absY = Math.abs(dy);
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 12) return;
 
-    if (Math.max(absX, absY) < 16) return;
-    if (absX > absY) move(dx > 0 ? 'right' : 'left');
-    else move(dy > 0 ? 'down' : 'up');
+    // Injectăm o apăsare scurtă în direcția swipe-ului
+    let key: string;
+    if (Math.abs(dx) > Math.abs(dy)) key = dx > 0 ? 'ArrowRight' : 'ArrowLeft';
+    else key = dy > 0 ? 'ArrowDown' : 'ArrowUp';
+
+    keysRef.current[key] = true;
+    setTimeout(() => { keysRef.current[key] = false; }, 180);
   }
 
+  // ─── Funcție pură de avansare logică în celulă (apelată din rAF) ─────────────
+  const advanceCellLogic = useCallback((newCol: number, newRow: number) => {
+    const gs = gameStateRef.current;
+    if (gs.finished) return;
+
+    const next: Position = { row: newRow, col: newCol };
+    const prevKey = keyOf(gs.player);
+    const nextKey = keyOf(next);
+    if (nextKey === prevKey) return; // încă în aceeași celulă
+
+    const nextVisited = new Set(gs.visited);
+    nextVisited.add(nextKey);
+    const nextSteps = gs.steps + 1;
+
+    // Colectare bonusuri
+    let nextCollected = gs.collected;
+    const nextBonuses = gs.bonuses.filter((b) => {
+      if (b.row === next.row && b.col === next.col) {
+        nextCollected += 1;
+        return false;
+      }
+      return true;
+    });
+
+    let nextCheckpoint = gs.checkpoint;
+    if (!nextCheckpoint && nextVisited.size >= Math.floor(activeCellCount / 3)) {
+      nextCheckpoint = next;
+    }
+
+    gs.player    = next;
+    gs.steps     = nextSteps;
+    gs.collected = nextCollected;
+    gs.visited   = nextVisited;
+    gs.bonuses   = nextBonuses;
+    gs.checkpoint = nextCheckpoint;
+
+    // Actualizare React state (re-render SVG bonusuri + stats)
+    setPlayer(next);
+    setSteps(nextSteps);
+    setCollected(nextCollected);
+    setBonuses(nextBonuses);
+    setVisited(nextVisited);
+    if (nextCheckpoint && nextCheckpoint !== gs.checkpoint) setCheckpoint(nextCheckpoint);
+
+    emitProgress(nextSteps, gs.wallHits, nextCollected, nextVisited);
+
+    // Exit?
+    if (next.row === exit.row && next.col === exit.col) {
+      gs.finished = true;
+      flushProgressNow();
+      const finalCorrect = Math.max(1, nextSteps + nextCollected * 6);
+      const finalMistakes = shouldPenalizeWalls ? gs.wallHits : 0;
+      onFinish(finalCorrect, finalMistakes, {
+        steps: nextSteps,
+        wallHits: gs.wallHits,
+        bonusesCollected: nextCollected,
+        usedCheckpoint: !!nextCheckpoint,
+      });
+    }
+  }, [activeCellCount, emitProgress, exit.col, exit.row, onFinish, shouldPenalizeWalls]);
+
+  // ─── rAF loop ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!started || finished) {
+      cancelAnimationFrame(rafRef.current);
+      return;
+    }
+
+    // Inițializăm bila la poziția de start (în px)
+    if (ballRef.current.x === 0 && ballRef.current.y === 0) {
+      ballRef.current = {
+        x: start.col * cellSize + cellSize / 2,
+        y: start.row * cellSize + cellSize / 2,
+        vx: 0,
+        vy: 0,
+      };
+    }
+
+    const ballRadius = cellSize / 3;
+
+    function loop(now: number) {
+      if (!canvasRef.current) { rafRef.current = requestAnimationFrame(loop); return; }
+      const dt = Math.min((now - lastTimeRef.current) / 1000, 0.05);
+      lastTimeRef.current = now;
+
+      // 1. Fizică — mouse drag are prioritate față de taste
+      const next = mouseDirRef.current
+        ? stepPhysicsWithDir(ballRef.current, mouseDirRef.current.ax, mouseDirRef.current.ay, dt, mouseDirRef.current.power)
+        : stepPhysics(ballRef.current, keysRef.current, dt);
+
+      // 2. Coliziune cu pereții
+      const { state, hitWall } = resolveCollisions(next, cellSize, maze, activeMap, ballRadius);
+      ballRef.current = state;
+
+      // 3. Wall hit → flash + bump scale
+      if (hitWall) {
+        const gs = gameStateRef.current;
+        gs.wallHits += 1;
+        setWallHits(gs.wallHits);
+        setWallFlash(true);
+        wallFlashScaleRef.current  = 0.92;
+        wallFlashTargetRef.current = 1.0;
+        setTimeout(() => setWallFlash(false), 160);
+        emitProgress(gs.steps, gs.wallHits, gs.collected, gs.visited);
+      }
+
+      // Animație scale bilă după coliziune (ease back to 1)
+      if (wallFlashScaleRef.current < wallFlashTargetRef.current) {
+        wallFlashScaleRef.current = Math.min(1, wallFlashScaleRef.current + dt * 8);
+      }
+
+      // 4. Detectare celulă nouă pentru logica de joc
+      const newCol = Math.floor(state.x / cellSize);
+      const newRow = Math.floor(state.y / cellSize);
+      if (
+        newRow >= 0 && newRow < mazeSize &&
+        newCol >= 0 && newCol < mazeSize &&
+        activeMap[newRow]?.[newCol]
+      ) {
+        advanceCellLogic(newCol, newRow);
+      }
+
+      // 5. Desenare canvas
+      const ctx = canvasRef.current?.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, mazeSize * cellSize, mazeSize * cellSize);
+        drawBall(
+          ctx,
+          ballRef.current,
+          cellSize,
+          trailRef.current,
+          wallFlashScaleRef.current < 0.99,
+          wallFlashScaleRef.current,
+        );
+      }
+
+      rafRef.current = requestAnimationFrame(loop);
+    }
+
+    lastTimeRef.current = performance.now();
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, finished, maze, activeMap, mazeSize, cellSize, advanceCellLogic, emitProgress]);
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) {
+        clearTimeout(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // isNeighborCell păstrăm pentru drag-mouse pe SVG (bazat pe player din React state)
   function isNeighborCell(target: Position): Direction | null {
     if (target.row === player.row - 1 && target.col === player.col) return 'up';
     if (target.row === player.row + 1 && target.col === player.col) return 'down';
     if (target.row === player.row && target.col === player.col - 1) return 'left';
     if (target.row === player.row && target.col === player.col + 1) return 'right';
     return null;
+  }
+
+  // Injecție direcție din click pe celulă vecinăă (compatibilitate drag mouse)
+  function injectDirection(dir: Direction) {
+    keysRef.current[dir === 'up' ? 'ArrowUp' : dir === 'down' ? 'ArrowDown' : dir === 'left' ? 'ArrowLeft' : 'ArrowRight'] = true;
+    setTimeout(() => {
+      keysRef.current['ArrowUp'] = keysRef.current['ArrowDown'] = keysRef.current['ArrowLeft'] = keysRef.current['ArrowRight'] = false;
+    }, 80);
   }
 
   return (
@@ -440,6 +608,18 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
 
       <div
         className="relative w-fit bg-slate-950 border-2 border-cyan-900/50 rounded-3xl p-4 select-none touch-none shadow-[0_0_48px_rgba(6,182,212,0.18)]"
+        style={{ cursor: started && !finished ? 'crosshair' : 'default' }}
+        onMouseDown={(e) => {
+          if (!started || finished) return;
+          e.preventDefault();
+          isDraggingRef.current = true;
+          // Salvăm originea în coordonate canvas
+          if (canvasRef.current) {
+            const rect = canvasRef.current.getBoundingClientRect();
+            mouseOriginRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+          }
+          updateMouseDir(e.clientX, e.clientY);
+        }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
@@ -450,10 +630,6 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
           style={{ background: 'linear-gradient(135deg,#0c1a2e 0%,#0a2020 100%)', margin: '0 auto' }}
         >
           <defs>
-            <filter id="glow-player" x="-60%" y="-60%" width="220%" height="220%">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur" />
-              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-            </filter>
             <filter id="glow-exit" x="-80%" y="-80%" width="260%" height="260%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
               <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
@@ -468,9 +644,7 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
             </filter>
             <style>{`
               @keyframes maze-exit-pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
-              @keyframes maze-aura-pulse { 0%,100%{opacity:0.3} 50%{opacity:0.08} }
               .maze-exit-pulse { animation: maze-exit-pulse 1.4s ease-in-out infinite; }
-              .maze-aura-pulse { animation: maze-aura-pulse 1s ease-in-out infinite; }
             `}</style>
           </defs>
 
@@ -501,12 +675,12 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
                   key={`${rowIndex}-${colIndex}`}
                   onMouseDown={() => {
                     const dir = isNeighborCell({ row: rowIndex, col: colIndex });
-                    if (dir) move(dir);
+                    if (dir) injectDirection(dir);
                   }}
                   onMouseEnter={(e) => {
                     if ((e.buttons & 1) !== 1) return;
                     const dir = isNeighborCell({ row: rowIndex, col: colIndex });
-                    if (dir) move(dir);
+                    if (dir) injectDirection(dir);
                   }}
                 >
                   {cell.top    && <line x1={x}           y1={y}           x2={x + cellSize} y2={y}           stroke="#22d3ee" strokeWidth="2" />}
@@ -556,22 +730,21 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
             );
           })}
 
-          {/* Player — aura ring + glowing core */}
-          <circle
-            cx={cellCenter(cellSize, player).x}
-            cy={cellCenter(cellSize, player).y}
-            r={cellSize / 3 + 5}
-            fill={wallFlash ? '#f43f5e' : '#3b82f6'}
-            className="maze-aura-pulse"
-          />
-          <circle
-            cx={cellCenter(cellSize, player).x}
-            cy={cellCenter(cellSize, player).y}
-            r={cellSize / 3}
-            fill={wallFlash ? '#f43f5e' : '#60a5fa'}
-            filter="url(#glow-player)"
-          />
+          {/* Bila este desenată pe canvas overlay — nu mai e în SVG */}
         </svg>
+
+        {/* Canvas overlay — bila + trail + effects la 60fps */}
+        <canvas
+          ref={canvasRef}
+          width={mazeSize * cellSize}
+          height={mazeSize * cellSize}
+          style={{
+            position: 'absolute',
+            top: '1rem', // padding-ul containerului
+            left: '1rem',
+            pointerEvents: 'none',
+          }}
+        />
 
         <div className="mt-3 text-center text-sm text-cyan-400/80 font-medium">
           {started && !finished
@@ -589,7 +762,7 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
       <div className="grid grid-cols-3 gap-2 w-[220px]">
         <div />
         <button
-          onClick={() => move('up')}
+          onClick={() => injectDirection('up')}
           disabled={!started || finished}
           className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
         >
@@ -597,7 +770,7 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
         </button>
         <div />
         <button
-          onClick={() => move('left')}
+          onClick={() => injectDirection('left')}
           disabled={!started || finished}
           className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
         >
@@ -607,7 +780,7 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
           ●
         </div>
         <button
-          onClick={() => move('right')}
+          onClick={() => injectDirection('right')}
           disabled={!started || finished}
           className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
         >
@@ -615,7 +788,7 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
         </button>
         <div />
         <button
-          onClick={() => move('down')}
+          onClick={() => injectDirection('down')}
           disabled={!started || finished}
           className="rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:opacity-30 transition-colors"
         >
