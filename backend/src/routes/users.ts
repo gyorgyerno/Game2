@@ -31,7 +31,7 @@ const router = Router();
 router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
   const user = await prisma.user.findUnique({
     where: { id: req.userId },
-    include: { gameStats: true },
+    include: { gameStats: true, gameRatings: true },
   });
   if (!user) return res.status(404).json({ error: 'Not found' });
   return res.json({ ...user, league: ratingToLeague(user.rating) });
@@ -44,7 +44,7 @@ router.get('/:id', async (req, res) => {
     select: {
       id: true, username: true, avatarUrl: true,
       rating: true, xp: true, league: true, createdAt: true,
-      gameStats: true,
+      gameStats: true, gameRatings: true,
     },
   });
   if (!user) return res.status(404).json({ error: 'Not found' });

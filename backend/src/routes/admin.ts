@@ -79,84 +79,94 @@ router.get('/stats', adminAuth, asyncHandler(async (_req: AdminRequest, res: Res
   res.json({ totalUsers, totalMatches, activeMatches, totalInvites, recentUsers });
 }));
 
+// ─── Cache pentru stats/overview (5 min TTL per perioadă) ────────────────────
+const _overviewCache = new Map<string, { data: unknown; expiresAt: number }>();
+
 // ─── GET /api/admin/stats/overview ───────────────────────────────────────────
 router.get('/stats/overview', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
-  const period = (req.query as { period?: string }).period ?? 'day';
+  const period = (['day', 'week', 'month'].includes((req.query as { period?: string }).period ?? ''))
+    ? ((req.query as { period?: string }).period as string)
+    : 'week';
 
-  let since: Date;
+  const cached = _overviewCache.get(period);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.json(cached.data);
+    return;
+  }
+
   const now = new Date();
-  if (period === 'week') {
-    since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  } else if (period === 'month') {
-    since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  } else {
-    // day
-    since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  }
+  const periodMs: Record<string, number> = { day: 86_400_000, week: 7 * 86_400_000, month: 30 * 86_400_000 };
+  const since = new Date(now.getTime() - periodMs[period]);
+  const sinceIso = since.toISOString();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 86_400_000);
+  const thirtyIso = thirtyDaysAgo.toISOString();
 
-  // ── Useri totali vs. noi in perioada ──────────────────────────────────────
-  const [totalUsers, newUsers, totalRealUsers, totalBots, totalGhosts] = await Promise.all([
-    prisma.user.count(),
-    prisma.user.count({ where: { createdAt: { gte: since }, userType: 'REAL' } }),
-    prisma.user.count({ where: { userType: 'REAL' } }),
-    prisma.user.count({ where: { userType: 'SIMULATED' } }),
-    prisma.user.count({ where: { userType: 'GHOST' } }),
-  ]);
-
-  // ── Meciuri in perioada ────────────────────────────────────────────────────
-  const matchesInPeriod = await prisma.match.findMany({
-    where: { createdAt: { gte: since }, status: 'finished' },
-    select: { gameType: true, level: true, isAI: true },
+  // ── 1. Contoare useri ─────────────────────────────────────────────────────
+  const userTypeCounts = await prisma.user.groupBy({
+    by: ['userType'],
+    _count: { id: true },
   });
+  const userByType = Object.fromEntries(userTypeCounts.map(r => [r.userType, r._count.id]));
+  const totalRealUsers = userByType['REAL'] ?? 0;
+  const totalBots      = userByType['SIMULATED'] ?? 0;
+  const totalGhosts    = userByType['GHOST'] ?? 0;
+  const totalUsers     = totalRealUsers + totalBots + totalGhosts;
 
-  const matchesTotal = matchesInPeriod.length;
-  const matchesSolo = matchesInPeriod.filter(m => m.isAI).length;
-  const matchesGroup = matchesInPeriod.filter(m => !m.isAI).length;
+  const newUsers = await prisma.user.count({ where: { createdAt: { gte: since }, userType: 'REAL' } });
 
-  // meciuri per joc
-  const perGame: Record<string, number> = {};
-  for (const m of matchesInPeriod) {
-    perGame[m.gameType] = (perGame[m.gameType] ?? 0) + 1;
-  }
-
-  // meciuri per nivel
-  const perLevel: Record<string, number> = {};
-  for (const m of matchesInPeriod) {
-    const k = `Nivel ${m.level}`;
-    perLevel[k] = (perLevel[k] ?? 0) + 1;
-  }
-
-  // unique useri care au jucat in perioada (numai REAL)
-  const activePlayers = await prisma.matchPlayer.findMany({
-    where: { createdAt: { gte: since }, user: { userType: 'REAL' } },
-    select: { userId: true },
-    distinct: ['userId'],
-  });
-  const activePlayersCount = activePlayers.length;
-
-  // useri care au jucat solo vs grup (unici, REAL)
-  const soloMatchIds = matchesInPeriod.filter(m => m.isAI).map((_: unknown) => '');
-  const soloMatchIdsReal = await prisma.match.findMany({
-    where: { createdAt: { gte: since }, status: 'finished', isAI: true },
-    select: { id: true },
-  });
-  const groupMatchIdsReal = await prisma.match.findMany({
-    where: { createdAt: { gte: since }, status: 'finished', isAI: false },
-    select: { id: true },
-  });
-
-  const [soloUniquePlayers, groupUniquePlayers] = await Promise.all([
-    prisma.matchPlayer.findMany({
-      where: { matchId: { in: soloMatchIdsReal.map(m => m.id) }, user: { userType: 'REAL' } },
-      select: { userId: true }, distinct: ['userId'],
+  // ── 2. Meciuri per joc + per nivel (groupBy, fără findMany) ──────────────
+  const [matchPerGame, matchPerLevel, matchIsAI] = await Promise.all([
+    prisma.match.groupBy({
+      by: ['gameType'],
+      where: { createdAt: { gte: since }, status: 'finished' },
+      _count: { id: true },
     }),
-    prisma.matchPlayer.findMany({
-      where: { matchId: { in: groupMatchIdsReal.map(m => m.id) }, user: { userType: 'REAL' } },
-      select: { userId: true }, distinct: ['userId'],
+    prisma.match.groupBy({
+      by: ['level'],
+      where: { createdAt: { gte: since }, status: 'finished' },
+      _count: { id: true },
+    }),
+    prisma.match.groupBy({
+      by: ['isAI'],
+      where: { createdAt: { gte: since }, status: 'finished' },
+      _count: { id: true },
     }),
   ]);
 
-  // distribuție useri per ligă
+  const perGame: Record<string, number> = Object.fromEntries(matchPerGame.map(r => [r.gameType, r._count.id]));
+  const perLevel: Record<string, number> = Object.fromEntries(matchPerLevel.map(r => [`Nivel ${r.level}`, r._count.id]));
+  const matchesTotal = matchPerGame.reduce((s, r) => s + r._count.id, 0);
+  const matchesSolo  = matchIsAI.find(r => r.isAI)?._count.id ?? 0;
+  const matchesGroup = matchIsAI.find(r => !r.isAI)?._count.id ?? 0;
+
+  // ── 3. Jucători activi + unici solo/grup (subquery SQL, fără IN array) ────
+  const [activePlayersRes, soloUniqueRes, groupUniqueRes] = await Promise.all([
+    prisma.$queryRaw<{ cnt: bigint }[]>`
+      SELECT COUNT(DISTINCT mp.userId) as cnt
+      FROM match_players mp
+      JOIN users u ON u.id = mp.userId
+      WHERE mp.createdAt >= ${sinceIso} AND u.userType = 'REAL'
+    `,
+    prisma.$queryRaw<{ cnt: bigint }[]>`
+      SELECT COUNT(DISTINCT mp.userId) as cnt
+      FROM match_players mp
+      JOIN matches m ON m.id = mp.matchId
+      JOIN users u ON u.id = mp.userId
+      WHERE m.createdAt >= ${sinceIso} AND m.status = 'finished' AND m.isAI = 1 AND u.userType = 'REAL'
+    `,
+    prisma.$queryRaw<{ cnt: bigint }[]>`
+      SELECT COUNT(DISTINCT mp.userId) as cnt
+      FROM match_players mp
+      JOIN matches m ON m.id = mp.matchId
+      JOIN users u ON u.id = mp.userId
+      WHERE m.createdAt >= ${sinceIso} AND m.status = 'finished' AND m.isAI = 0 AND u.userType = 'REAL'
+    `,
+  ]);
+  const activePlayersCount = Number(activePlayersRes[0]?.cnt ?? 0);
+  const soloUnique          = Number(soloUniqueRes[0]?.cnt ?? 0);
+  const groupUnique         = Number(groupUniqueRes[0]?.cnt ?? 0);
+
+  // ── 4. Distribuție ligi ────────────────────────────────────────────────────
   const leagueRaw = await prisma.user.groupBy({
     by: ['league'],
     where: { userType: 'REAL' },
@@ -164,7 +174,7 @@ router.get('/stats/overview', adminAuth, asyncHandler(async (req: AdminRequest, 
   });
   const perLeague = Object.fromEntries(leagueRaw.map(r => [r.league, r._count.id]));
 
-  // top 5 useri după rating (reali)
+  // ── 5. Top 5 useri ────────────────────────────────────────────────────────
   const topUsers = await prisma.user.findMany({
     where: { userType: 'REAL' },
     orderBy: { rating: 'desc' },
@@ -172,129 +182,153 @@ router.get('/stats/overview', adminAuth, asyncHandler(async (req: AdminRequest, 
     select: { username: true, rating: true, league: true, xp: true },
   });
 
-  // serii temporale: useri noi per zi (ultimele 30 zile fix)
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const recentRegistrations = await prisma.user.findMany({
-    where: { createdAt: { gte: thirtyDaysAgo }, userType: 'REAL' },
-    select: { createdAt: true },
-    orderBy: { createdAt: 'asc' },
-  });
-  const registrationsByDay: Record<string, number> = {};
-  for (const u of recentRegistrations) {
-    const d = u.createdAt.toISOString().split('T')[0];
-    registrationsByDay[d] = (registrationsByDay[d] ?? 0) + 1;
-  }
-  const registrationTimeline = Object.entries(registrationsByDay)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, count]) => ({ date, count }));
+  // ── 6. Timeline înregistrări + meciuri (raw SQL GROUP BY date) ───────────
+  const [regTimeline, matchTimeline] = await Promise.all([
+    prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      SELECT strftime('%Y-%m-%d', createdAt) as date, COUNT(*) as count
+      FROM users
+      WHERE createdAt >= ${thirtyIso} AND userType = 'REAL'
+      GROUP BY date ORDER BY date ASC
+    `,
+    prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      SELECT strftime('%Y-%m-%d', createdAt) as date, COUNT(*) as count
+      FROM matches
+      WHERE createdAt >= ${thirtyIso} AND status = 'finished'
+      GROUP BY date ORDER BY date ASC
+    `,
+  ]);
 
-  // serii temporale: meciuri per zi (ultimele 30 zile fix)
-  const recentMatches = await prisma.match.findMany({
-    where: { createdAt: { gte: thirtyDaysAgo }, status: 'finished' },
-    select: { createdAt: true, gameType: true },
-    orderBy: { createdAt: 'asc' },
-  });
-  const matchesByDay: Record<string, number> = {};
-  for (const m of recentMatches) {
-    const d = m.createdAt.toISOString().split('T')[0];
-    matchesByDay[d] = (matchesByDay[d] ?? 0) + 1;
-  }
-  const matchTimeline = Object.entries(matchesByDay)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, count]) => ({ date, count }));
+  const registrationTimeline = regTimeline.map(r => ({ date: r.date, count: Number(r.count) }));
+  const matchTimelineFmt     = matchTimeline.map(r => ({ date: r.date, count: Number(r.count) }));
 
-  res.json({
+  const payload = {
     period,
     users: { total: totalUsers, real: totalRealUsers, bots: totalBots, ghosts: totalGhosts, newInPeriod: newUsers, activePlayers: activePlayersCount },
     matches: { total: matchesTotal, solo: matchesSolo, group: matchesGroup, perGame, perLevel },
-    players: { soloUnique: soloUniquePlayers.length, groupUnique: groupUniquePlayers.length },
+    players: { soloUnique, groupUnique },
     perLeague,
     topUsers,
     registrationTimeline,
-    matchTimeline,
-  });
+    matchTimeline: matchTimelineFmt,
+  };
+
+  _overviewCache.set(period, { data: payload, expiresAt: Date.now() + 5 * 60_000 });
+  res.json(payload);
 }));
+
+// ─── Cache pentru stats/abandon (5 min TTL) ───────────────────────────────────
+const _abandonCache = new Map<string, { data: unknown; expiresAt: number }>();
 
 // ─── GET /api/admin/stats/abandon ────────────────────────────────────────────
 router.get('/stats/abandon', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
-  const now = new Date();
-  const since7  = new Date(now.getTime() -  7 * 24 * 60 * 60 * 1000);
-  const since14 = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-  const since30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const cached = _abandonCache.get('abandon');
+  if (cached && cached.expiresAt > Date.now()) {
+    res.json(cached.data);
+    return;
+  }
 
-  const [all30, blockedCount] = await Promise.all([
-    prisma.match.findMany({
-      where: { finishedAt: { gte: since30 }, status: 'abandoned' },
-      select: { gameType: true, level: true, isAI: true, finishedAt: true,
-        players: { select: { userId: true, user: { select: { username: true, userType: true } } } } },
-    }),
-    prisma.user.count({ where: { isBanned: true, userType: 'REAL' } }),
+  const now = new Date();
+  const since7Iso  = new Date(now.getTime() -  7 * 86_400_000).toISOString();
+  const since14Iso = new Date(now.getTime() - 14 * 86_400_000).toISOString();
+  const since30Iso = new Date(now.getTime() - 30 * 86_400_000).toISOString();
+
+  // ── Ferestre per joc + per nivel (groupBy, fără findMany cu JOIN) ─────────
+  async function buildWindow(sinceIso: string) {
+    const sinceDate = new Date(sinceIso);
+    const [byGame, byLevel] = await Promise.all([
+      prisma.match.groupBy({
+        by: ['gameType', 'isAI'],
+        where: { status: 'abandoned', finishedAt: { gte: sinceDate } },
+        _count: { id: true },
+      }),
+      prisma.match.groupBy({
+        by: ['level', 'isAI'],
+        where: { status: 'abandoned', finishedAt: { gte: sinceDate } },
+        _count: { id: true },
+      }),
+    ]);
+
+    const perGame: Record<string, number> = {};
+    const perLevel: Record<string, number> = {};
+    let solo = 0, multi = 0;
+
+    for (const r of byGame) {
+      perGame[r.gameType] = (perGame[r.gameType] ?? 0) + r._count.id;
+      if (r.isAI) solo += r._count.id; else multi += r._count.id;
+    }
+    for (const r of byLevel) {
+      const k = `Nivel ${r.level}`;
+      perLevel[k] = (perLevel[k] ?? 0) + r._count.id;
+    }
+    return { total: solo + multi, solo, multi, perGame, perLevel };
+  }
+
+  // ── Top abandoners REAL (raw SQL — evită IN() array uriaș) ──────────────
+  type AbandonerRow = { username: string; cnt: bigint };
+  const topAbandoners30 = await prisma.$queryRaw<AbandonerRow[]>`
+    SELECT u.username, COUNT(*) as cnt
+    FROM match_players mp
+    JOIN matches m ON m.id = mp.matchId
+    JOIN users u ON u.id = mp.userId
+    WHERE m.status = 'abandoned'
+      AND m.finishedAt >= ${since30Iso}
+      AND u.userType = 'REAL'
+    GROUP BY mp.userId, u.username
+    ORDER BY cnt DESC
+    LIMIT 5
+  `;
+  const topAbandoners = topAbandoners30.map(r => ({ username: r.username, count: Number(r.cnt) }));
+
+  // ── Timeline abandonuri per zi (raw SQL GROUP BY date) ───────────────────
+  type TRow = { date: string; count: bigint };
+  const timelineRaw = await prisma.$queryRaw<TRow[]>`
+    SELECT strftime('%Y-%m-%d', finishedAt) as date, COUNT(*) as count
+    FROM matches
+    WHERE status = 'abandoned' AND finishedAt >= ${since30Iso}
+    GROUP BY date ORDER BY date ASC
+  `;
+  const timeline = timelineRaw.map(r => ({ date: r.date, count: Number(r.count) }));
+
+  // ── Useri blocați ────────────────────────────────────────────────────────
+  const blockedCount = await prisma.user.count({ where: { isBanned: true, userType: 'REAL' } });
+
+  const [w7, w14, w30] = await Promise.all([
+    buildWindow(since7Iso),
+    buildWindow(since14Iso),
+    buildWindow(since30Iso),
   ]);
 
-  function buildWindow(sinceDate: Date) {
-    const rows = all30.filter(m => m.finishedAt && m.finishedAt >= sinceDate);
-    const total = rows.length;
-    const solo  = rows.filter(m => m.isAI).length;
-    const multi = rows.filter(m => !m.isAI).length;
-
-    const perGame:  Record<string, number> = {};
-    const perLevel: Record<string, number> = {};
-    for (const m of rows) {
-      perGame[m.gameType] = (perGame[m.gameType] ?? 0) + 1;
-      const k = `Nivel ${m.level}`;
-      perLevel[k] = (perLevel[k] ?? 0) + 1;
-    }
-    return { total, solo, multi, perGame, perLevel };
-  }
-
-  // Top abandoners (REAL users) last 30 days
-  const abandonerMap: Record<string, { username: string; count: number }> = {};
-  for (const m of all30) {
-    for (const p of m.players) {
-      if (p.user.userType !== 'REAL') continue;
-      if (!abandonerMap[p.userId]) abandonerMap[p.userId] = { username: p.user.username, count: 0 };
-      abandonerMap[p.userId].count++;
-    }
-  }
-  const topAbandoners = Object.values(abandonerMap)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
-
-  // Timeline abandonuri pe zi (30 zile)
-  const byDay: Record<string, number> = {};
-  for (const m of all30) {
-    if (!m.finishedAt) continue;
-    const d = m.finishedAt.toISOString().split('T')[0];
-    byDay[d] = (byDay[d] ?? 0) + 1;
-  }
-  const timeline = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count }));
-
-  res.json({
-    windows: { '7d': buildWindow(since7), '14d': buildWindow(since14), '30d': buildWindow(since30) },
+  const payload = {
+    windows: { '7d': w7, '14d': w14, '30d': w30 },
     topAbandoners,
     blockedCount,
     timeline,
-  });
+  };
+
+  _abandonCache.set('abandon', { data: payload, expiresAt: Date.now() + 5 * 60_000 });
+  res.json(payload);
 }));
 
 // ─── GET /api/admin/stats/games-per-day ──────────────────────────────────────
 router.get('/stats/games-per-day', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
   const days = Math.min(90, Math.max(1, parseInt((req.query as { days?: string }).days ?? '30', 10) || 30));
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const sinceIso = new Date(Date.now() - days * 86_400_000).toISOString();
 
-  const matches = await prisma.match.findMany({
-    where: { createdAt: { gte: since }, status: 'finished' },
-    select: { gameType: true, createdAt: true },
-  });
+  type GpdRow = { date: string; gameType: string; count: bigint };
+  const rows = await prisma.$queryRaw<GpdRow[]>`
+    SELECT strftime('%Y-%m-%d', createdAt) as date, gameType, COUNT(*) as count
+    FROM matches
+    WHERE createdAt >= ${sinceIso} AND status = 'finished'
+    GROUP BY date, gameType
+    ORDER BY date ASC
+  `;
 
   const gameTypesSet = new Set<string>();
   const grouped: Record<string, Record<string, number>> = {};
-
-  for (const match of matches) {
-    const date = match.createdAt.toISOString().split('T')[0];
-    gameTypesSet.add(match.gameType);
-    if (!grouped[date]) grouped[date] = {};
-    grouped[date][match.gameType] = (grouped[date][match.gameType] ?? 0) + 1;
+  for (const r of rows) {
+    gameTypesSet.add(r.gameType);
+    if (!grouped[r.date]) grouped[r.date] = {};
+    grouped[r.date][r.gameType] = Number(r.count);
   }
 
   const gameTypes = [...gameTypesSet].sort();
@@ -303,6 +337,120 @@ router.get('/stats/games-per-day', adminAuth, asyncHandler(async (req: AdminRequ
     .map(([date, counts]) => ({ date, ...counts }));
 
   res.json({ data, gameTypes, days });
+}));
+
+// ─── Dashboard cache (10s TTL) ────────────────────────────────────────────────
+let _dashboardCache: { data: unknown; expiresAt: number } | null = null;
+
+// ─── GET /api/admin/dashboard ─────────────────────────────────────────────────
+router.get('/dashboard', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const now = Date.now();
+  if (_dashboardCache && now < _dashboardCache.expiresAt) {
+    res.set('X-Cache', 'HIT');
+    res.json(_dashboardCache.data);
+    return;
+  }
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const yesterdayStart = new Date(todayStart.getTime() - 86_400_000);
+  const todayIso = todayStart.toISOString();
+  const yesterdayIso = yesterdayStart.toISOString();
+  const stuckActiveThreshold = new Date(now - 3 * 3600_000);
+  const stuckWaitingThreshold = new Date(now - 30 * 60_000);
+
+  const [
+    activeMatches, waitingMatches,
+    todayUsers, yesterdayUsers,
+    todayFinished, yesterdayFinished,
+    todayAbandoned,
+    stuckActiveCount, stuckWaitingCount,
+    platformRows,
+  ] = await Promise.all([
+    prisma.match.count({ where: { status: { in: ['active', 'countdown'] } } }),
+    prisma.match.count({ where: { status: 'waiting' } }),
+    prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
+    prisma.user.count({ where: { createdAt: { gte: yesterdayStart, lt: todayStart } } }),
+    prisma.match.count({ where: { status: 'finished', finishedAt: { gte: todayStart } } }),
+    prisma.match.count({ where: { status: 'finished', finishedAt: { gte: yesterdayStart, lt: todayStart } } }),
+    prisma.match.count({ where: { status: 'abandoned', finishedAt: { gte: todayStart } } }),
+    prisma.match.count({ where: { status: 'active', startedAt: { lt: stuckActiveThreshold } } }),
+    prisma.match.count({ where: { status: 'waiting', createdAt: { lt: stuckWaitingThreshold } } }),
+    prisma.$queryRaw<{ platform: string; count: bigint }[]>`
+      SELECT COALESCE(platform, 'web') as platform, COUNT(*) as count
+      FROM users GROUP BY COALESCE(platform, 'web')
+    `,
+  ]);
+
+  const stuckCount = stuckActiveCount + stuckWaitingCount;
+  const abandonRate = todayFinished + todayAbandoned > 0
+    ? Math.round((todayAbandoned / (todayFinished + todayAbandoned)) * 100)
+    : 0;
+
+  const platforms: Record<string, number> = {};
+  for (const r of platformRows) platforms[r.platform] = Number(r.count);
+
+  type ActivityRow = { type: string; username: string; description: string; at: string };
+  const recentActivity = await prisma.$queryRaw<ActivityRow[]>`
+    SELECT type, username, description, at FROM (
+      SELECT 'match' as type, u.username, 'Meci terminat' as description, m.finishedAt as at
+      FROM matches m
+      JOIN match_players mp ON mp.matchId = m.id
+      JOIN users u ON u.id = mp.userId
+      WHERE m.status = 'finished' AND m.finishedAt IS NOT NULL AND u.userType = 'REAL'
+      GROUP BY m.id
+      ORDER BY m.finishedAt DESC LIMIT 5
+    )
+    UNION ALL
+    SELECT type, username, description, at FROM (
+      SELECT 'user' as type, username, 'Utilizator nou' as description, createdAt as at
+      FROM users WHERE userType = 'REAL'
+      ORDER BY createdAt DESC LIMIT 5
+    )
+    ORDER BY at DESC LIMIT 10
+  `;
+
+  const payload = {
+    live: { activeMatches, waitingMatches },
+    today: { newUsers: todayUsers, finishedMatches: todayFinished, abandonRate },
+    yesterday: { newUsers: yesterdayUsers, finishedMatches: yesterdayFinished },
+    alerts: { stuckCount, highAbandon: abandonRate >= 30 },
+    platforms,
+    recentActivity,
+  };
+
+  _dashboardCache = { data: payload, expiresAt: now + 10_000 };
+  res.json(payload);
+}));
+
+// ─── Peak-hours cache (1h TTL) ────────────────────────────────────────────────
+let _peakHoursCache: { data: unknown; expiresAt: number } | null = null;
+
+// ─── GET /api/admin/stats/peak-hours ─────────────────────────────────────────
+router.get('/stats/peak-hours', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const now = Date.now();
+  if (_peakHoursCache && now < _peakHoursCache.expiresAt) {
+    res.set('X-Cache', 'HIT');
+    res.json(_peakHoursCache.data);
+    return;
+  }
+
+  type HourRow = { hour: string; count: bigint };
+  const rows = await prisma.$queryRaw<HourRow[]>`
+    SELECT strftime('%H', finishedAt) as hour, COUNT(*) as count
+    FROM matches WHERE status = 'finished' AND finishedAt IS NOT NULL
+    GROUP BY hour ORDER BY hour ASC
+  `;
+
+  const hours = Array.from({ length: 24 }, (_, i) => {
+    const h = String(i).padStart(2, '0');
+    const row = rows.find(r => r.hour === h);
+    return { hour: i, count: row ? Number(row.count) : 0 };
+  });
+
+  const data = { hours };
+  _peakHoursCache = { data, expiresAt: now + 3_600_000 };
+  res.json(data);
 }));
 
 // ─── GET /api/admin/simulated-players/health ─────────────────────────────────
@@ -1156,11 +1304,16 @@ router.patch('/games/:id/order', adminAuth, asyncHandler(async (req: AdminReques
 }));
 
 // ─── GET /api/admin/users ─────────────────────────────────────────────────────
+// Count cache: key = serialised where clause, TTL = 30s
+const _userCountCache = new Map<string, { count: number; expiresAt: number }>();
+
 router.get('/users', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
-  const page = parseInt((req.query.page as string) || '1');
-  const limit = parseInt((req.query.limit as string) || '20');
-  const search = (req.query.search as string) || '';
-  const userType = (req.query.userType as string) || '';
+  const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '20', 10)));
+  const search = ((req.query.search as string) || '').trim();
+  const userType = ((req.query.userType as string) || '').trim();
+  const sortBy = ((req.query.sortBy as string) || 'createdAt').trim();
+  const sortDir: 'asc' | 'desc' = (req.query.sortDir as string) === 'asc' ? 'asc' : 'desc';
   const skip = (page - 1) * limit;
 
   const baseWhere = search
@@ -1168,21 +1321,38 @@ router.get('/users', adminAuth, asyncHandler(async (req: AdminRequest, res: Resp
     : {};
   const where = userType ? { ...baseWhere, userType } : baseWhere;
 
-  const [users, total] = await Promise.all([
-    prisma.user.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
-      select: {
-        id: true, email: true, username: true, avatarUrl: true,
-        rating: true, xp: true, league: true, referralCode: true, createdAt: true,
-        userType: true, isBanned: true, lastIp: true,
-        _count: { select: { matchPlayers: true } },
-      },
-    }),
-    prisma.user.count({ where }),
-  ]);
+  // Server-side orderBy
+  const SORT_FIELDS = ['createdAt', 'rating', 'xp', 'league'] as const;
+  type SortField = typeof SORT_FIELDS[number];
+  const orderBy: object = sortBy === 'matches'
+    ? { matchPlayers: { _count: sortDir } }
+    : SORT_FIELDS.includes(sortBy as SortField)
+      ? { [sortBy]: sortDir }
+      : { createdAt: 'desc' };
+
+  // Cached count (30s TTL) — avoid full-table scan on every page flip
+  const cacheKey = JSON.stringify(where);
+  const cached = _userCountCache.get(cacheKey);
+  let total: number;
+  if (cached && cached.expiresAt > Date.now()) {
+    total = cached.count;
+  } else {
+    total = await prisma.user.count({ where });
+    _userCountCache.set(cacheKey, { count: total, expiresAt: Date.now() + 30_000 });
+  }
+
+  const users = await prisma.user.findMany({
+    where,
+    orderBy,
+    skip,
+    take: limit,
+    select: {
+      id: true, email: true, username: true, avatarUrl: true,
+      rating: true, xp: true, league: true, referralCode: true, createdAt: true,
+      userType: true, isBanned: true, lastIp: true,
+      _count: { select: { matchPlayers: true } },
+    },
+  });
 
   // Abandon count per user (30 zile) — numai pentru userii de pe pagina curentă
   const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -1338,13 +1508,171 @@ router.delete('/invites/:id', adminAuth, asyncHandler(async (req: AdminRequest, 
   res.json({ message: 'Invite sters' });
 }));
 
+// ─── GET /api/admin/matches/cleanup/preview ──────────────────────────────────
+router.get('/matches/cleanup/preview', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const olderThanDays = Math.max(1, Math.min(3650, parseInt((req.query.olderThanDays as string) || '30', 10) || 30));
+  const rawStatuses = ((req.query.statuses as string) || 'finished,abandoned').split(',').map(s => s.trim());
+  const safeStatuses = rawStatuses.filter(s => ['finished', 'abandoned'].includes(s));
+  if (safeStatuses.length === 0) {
+    res.status(400).json({ error: 'Cel puțin un status valid (finished, abandoned) este necesar' });
+    return;
+  }
+  const cutoff = new Date(Date.now() - olderThanDays * 86_400_000);
+  const where = { createdAt: { lt: cutoff }, status: { in: safeStatuses } };
+  const [count, oldest] = await Promise.all([
+    prisma.match.count({ where }),
+    prisma.match.findFirst({ where, orderBy: { createdAt: 'asc' }, select: { createdAt: true } }),
+  ]);
+  res.json({
+    count,
+    oldestDate: oldest?.createdAt ?? null,
+    cutoffDate: cutoff,
+    olderThanDays,
+    statuses: safeStatuses,
+  });
+}));
+
+// ─── DELETE /api/admin/matches/cleanup ───────────────────────────────────────
+router.delete('/matches/cleanup', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { olderThanDays, statuses } = req.body as { olderThanDays?: number; statuses?: string[] };
+  if (!Number.isInteger(olderThanDays) || (olderThanDays as number) < 1 || (olderThanDays as number) > 3650) {
+    res.status(400).json({ error: 'olderThanDays trebuie să fie integer între 1 și 3650' });
+    return;
+  }
+  if (!Array.isArray(statuses) || statuses.length === 0) {
+    res.status(400).json({ error: 'statuses este obligatoriu' });
+    return;
+  }
+  const safeStatuses = statuses.filter(s => ['finished', 'abandoned'].includes(s));
+  if (safeStatuses.length === 0) {
+    res.status(400).json({ error: 'Statusuri permise: finished, abandoned' });
+    return;
+  }
+  const cutoff = new Date(Date.now() - (olderThanDays as number) * 86_400_000);
+  const where = { createdAt: { lt: cutoff }, status: { in: safeStatuses } };
+
+  // Colectăm ID-urile în memorie (UUIDs: ~36 bytes × N)
+  const toDelete = await prisma.match.findMany({ where, select: { id: true } });
+  const ids = toDelete.map(m => m.id);
+
+  if (ids.length === 0) {
+    res.json({ deletedCount: 0 });
+    return;
+  }
+
+  // Ștergere în fragmente de 500 pentru a evita timeout-urile DB
+  const CHUNK = 500;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    await prisma.invite.deleteMany({ where: { matchId: { in: chunk } } });
+    await prisma.matchPlayer.deleteMany({ where: { matchId: { in: chunk } } });
+    await prisma.match.deleteMany({ where: { id: { in: chunk } } });
+  }
+
+  logger.warn(`[ADMIN] Match cleanup: ${ids.length} meciuri șterse (>${olderThanDays}z, status: ${safeStatuses.join(',')}) de ${req.adminUsername}`);
+  res.json({ deletedCount: ids.length });
+}));
+
+// ─── GET /api/admin/matches ────────────────────────────────────────────────────
+// ─── GET /api/admin/matches/stats ────────────────────────────────────────────
+const _matchStatsCache = new Map<string, { data: unknown; expiresAt: number }>();
+
+router.get('/matches/stats', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const cacheKey = 'match_stats_today';
+  const cached = _matchStatsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.json(cached.data);
+    return;
+  }
+
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const [todayTotal, todayFinished, todayAbandoned, activeNow, waitingNow] = await Promise.all([
+    prisma.match.count({ where: { createdAt: { gte: startOfDay } } }),
+    prisma.match.count({ where: { createdAt: { gte: startOfDay }, status: 'finished' } }),
+    prisma.match.count({ where: { createdAt: { gte: startOfDay }, status: 'abandoned' } }),
+    prisma.match.count({ where: { status: 'active' } }),
+    prisma.match.count({ where: { status: 'waiting' } }),
+  ]);
+
+  const abandonRate = todayTotal > 0 ? Math.round((todayAbandoned / todayTotal) * 100) : 0;
+
+  const data = { todayTotal, todayFinished, todayAbandoned, activeNow, waitingNow, abandonRate };
+  _matchStatsCache.set(cacheKey, { data, expiresAt: Date.now() + 30_000 });
+  res.json(data);
+}));
+
+// ─── GET /api/admin/matches/stuck ────────────────────────────────────────────
+router.get('/matches/stuck', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const activeThreshold  = new Date(Date.now() - 3 * 60 * 60 * 1000);   // >3h active
+  const waitingThreshold = new Date(Date.now() - 30 * 60 * 1000);        // >30min waiting
+
+  const [stuckActive, stuckWaiting] = await Promise.all([
+    prisma.match.findMany({
+      where: { status: 'active', startedAt: { lt: activeThreshold } },
+      include: { players: { include: { user: { select: { username: true, userType: true } } } } },
+      orderBy: { startedAt: 'asc' },
+    }),
+    prisma.match.findMany({
+      where: { status: 'waiting', createdAt: { lt: waitingThreshold } },
+      include: { players: { include: { user: { select: { username: true, userType: true } } } } },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ]);
+
+  res.json({
+    stuckActive,
+    stuckWaiting,
+    totalStuck: stuckActive.length + stuckWaiting.length,
+  });
+}));
+
+// ─── POST /api/admin/matches/stuck/force-abandon ─────────────────────────────
+router.post('/matches/stuck/force-abandon', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { ids } = req.body as { ids?: string[] };
+  if (!Array.isArray(ids) || ids.length === 0) {
+    res.status(400).json({ error: 'ids este obligatoriu (array de string)' });
+    return;
+  }
+  if (ids.length > 500) {
+    res.status(400).json({ error: 'Maximum 500 ids per request' });
+    return;
+  }
+
+  const result = await prisma.match.updateMany({
+    where: { id: { in: ids }, status: { in: ['active', 'waiting', 'countdown'] } },
+    data: { status: 'abandoned', finishedAt: new Date() },
+  });
+
+  logger.warn(`[ADMIN] Force-abandon ${result.count} meciuri stuck de ${req.adminUsername}`);
+  res.json({ updatedCount: result.count });
+}));
+
 // ─── GET /api/admin/matches ────────────────────────────────────────────────────
 router.get('/matches', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
-  const page = parseInt((req.query.page as string) || '1');
-  const status = (req.query.status as string) || '';
+  const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
+  const status = ((req.query.status as string) || '').trim();
+  const gameType = ((req.query.gameType as string) || '').trim();
+  const search = ((req.query.search as string) || '').trim();
   const limit = 20;
   const skip = (page - 1) * limit;
-  const where = status ? { status } : {};
+
+  const where: Record<string, unknown> = {};
+  if (status) where.status = status;
+  if (gameType) where.gameType = gameType;
+  if (search) {
+    where.players = {
+      some: {
+        user: {
+          OR: [
+            { username: { contains: search } },
+            { email: { contains: search } },
+          ],
+        },
+      },
+    };
+  }
 
   const [matches, total] = await Promise.all([
     prisma.match.findMany({
@@ -1353,12 +1681,26 @@ router.get('/matches', adminAuth, asyncHandler(async (req: AdminRequest, res: Re
       skip,
       take: limit,
       include: {
-        players: { include: { user: { select: { username: true, avatarUrl: true } } } },
+        players: { include: { user: { select: { username: true, avatarUrl: true, userType: true } } } },
       },
     }),
     prisma.match.count({ where }),
   ]);
-  res.json({ matches, total, page, totalPages: Math.ceil(total / limit) });
+
+  // Colectăm gameType-urile unice din DB pentru dropdown filter
+  const gameTypes = await prisma.match.findMany({
+    select: { gameType: true },
+    distinct: ['gameType'],
+    orderBy: { gameType: 'asc' },
+  });
+
+  res.json({
+    matches,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit),
+    gameTypes: gameTypes.map(g => g.gameType),
+  });
 }));
 
 // ─── GET /api/admin/logs ───────────────────────────────────────────────────────

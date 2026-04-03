@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import adminApi from '@/lib/adminApi';
+import { Paginator } from '@/components/admin/Paginator';
 
 interface User {
   id: string;
@@ -63,32 +64,13 @@ function RealUsersTab() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<'rating' | 'league' | 'matches' | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [errMsg, setErrMsg] = useState('');
 
-  const handleSort = (key: 'rating' | 'league' | 'matches') => {
-    if (sortKey === key) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortKey(key);
-      setSortDir('desc');
-    }
-  };
-
-  const sortedUsers = [...users].sort((a, b) => {
-    if (!sortKey) return 0;
-    let av: number | string, bv: number | string;
-    if (sortKey === 'rating') { av = a.rating; bv = b.rating; }
-    else if (sortKey === 'league') { av = a.league; bv = b.league; }
-    else { av = a._count.matchPlayers; bv = b._count.matchPlayers; }
-    if (av < bv) return sortDir === 'asc' ? -1 : 1;
-    if (av > bv) return sortDir === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  const load = async (p = page, s = search) => {
+  const load = async (p = page, s = search, sk = sortKey, sd = sortDir) => {
     setLoading(true);
     try {
       const { data } = await adminApi.get('/api/admin/users', {
-        params: { page: p, search: s, limit: 20, userType: 'REAL' },
+        params: { page: p, search: s, limit: 20, userType: 'REAL', sortBy: sk ?? 'createdAt', sortDir: sd },
       });
       setUsers(data.users);
       setTotal(data.total);
@@ -97,7 +79,16 @@ function RealUsersTab() {
     }
   };
 
-  useEffect(() => { load(); }, [page]);
+  const handleSort = (key: 'rating' | 'league' | 'matches') => {
+    const newDir: 'asc' | 'desc' = sortKey === key ? (sortDir === 'asc' ? 'desc' : 'asc') : 'desc';
+    setSortKey(key);
+    setSortDir(newDir);
+    setPage(1);
+    load(1, search, key, newDir);
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(page, search, sortKey, sortDir); }, [page]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,9 +102,14 @@ function RealUsersTab() {
   };
 
   const resetRating = async (id: string) => {
-    await adminApi.patch(`/api/admin/users/${id}/reset-rating`);
-    msg('Rating resetat la 1000');
-    load();
+    try {
+      await adminApi.patch(`/api/admin/users/${id}/reset-rating`);
+      msg('Rating resetat la 1000');
+      load();
+    } catch {
+      setErrMsg('Eroare la reset rating');
+      setTimeout(() => setErrMsg(''), 3000);
+    }
   };
 
   const toggleBan = async (id: string, isBanned: boolean) => {
@@ -129,10 +125,16 @@ function RealUsersTab() {
   };
 
   const deleteUser = async (id: string) => {
-    await adminApi.delete(`/api/admin/users/${id}`);
-    setConfirmDelete(null);
-    msg('User șters');
-    load();
+    try {
+      await adminApi.delete(`/api/admin/users/${id}`);
+      setConfirmDelete(null);
+      msg('User șters');
+      load();
+    } catch {
+      setConfirmDelete(null);
+      setErrMsg('Eroare la ștergere user');
+      setTimeout(() => setErrMsg(''), 3000);
+    }
   };
 
   return (
@@ -196,9 +198,9 @@ function RealUsersTab() {
           <tbody>
             {loading ? (
               <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>Se încarcă...</td></tr>
-            ) : sortedUsers.length === 0 ? (
+            ) : users.length === 0 ? (
               <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: '#475569' }}>Niciun utilizator găsit</td></tr>
-            ) : sortedUsers.map((u, i) => (
+            ) : users.map((u, i) => (
               <tr key={u.id} style={{ borderTop: '1px solid #1e2433', background: i % 2 === 0 ? 'transparent' : '#141720' }}>
                 <td style={{ padding: '12px 16px', color: '#e2e8f0', fontWeight: 500 }}>
                   {u.username}
@@ -278,17 +280,7 @@ function RealUsersTab() {
         </table>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'center' }}>
-        {Array.from({ length: Math.ceil(total / 20) }, (_, i) => i + 1).map(p => (
-          <button key={p} onClick={() => setPage(p)} style={{
-            padding: '6px 12px', background: p === page ? '#7c3aed' : '#1a1d27',
-            color: p === page ? '#fff' : '#94a3b8', border: '1px solid #2d3748',
-            borderRadius: 6, cursor: 'pointer', fontSize: 13,
-          }}>
-            {p}
-          </button>
-        ))}
-      </div>
+      <Paginator page={page} totalPages={Math.ceil(total / 20)} onChange={setPage} />
 
       {confirmDelete && (
         <div style={{
@@ -333,6 +325,7 @@ function BotsTab() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState('');
+  const [errMsg, setErrMsg] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const load = async (p = page, s = search) => {
@@ -348,6 +341,7 @@ function BotsTab() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [page]);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -362,16 +356,27 @@ function BotsTab() {
   };
 
   const toggleEnabled = async (profileId: string, current: boolean) => {
-    await adminApi.patch(`/api/admin/simulated-players/profiles/${profileId}`, { enabled: !current });
-    msg(!current ? 'Bot activat' : 'Bot dezactivat');
-    load();
+    try {
+      await adminApi.patch(`/api/admin/simulated-players/profiles/${profileId}`, { enabled: !current });
+      msg(!current ? 'Bot activat' : 'Bot dezactivat');
+      load();
+    } catch {
+      setErrMsg('Eroare la activare/dezactivare bot');
+      setTimeout(() => setErrMsg(''), 3000);
+    }
   };
 
   const deleteBot = async (userId: string) => {
-    await adminApi.delete(`/api/admin/users/${userId}`);
-    setConfirmDelete(null);
-    msg('Bot șters');
-    load();
+    try {
+      await adminApi.delete(`/api/admin/users/${userId}`);
+      setConfirmDelete(null);
+      msg('Bot șters');
+      load();
+    } catch {
+      setConfirmDelete(null);
+      setErrMsg('Eroare la ștergere bot');
+      setTimeout(() => setErrMsg(''), 3000);
+    }
   };
 
   return (
@@ -382,6 +387,14 @@ function BotsTab() {
           padding: '10px 16px', color: '#86efac', marginBottom: 16, fontSize: 14,
         }}>
           ✅ {actionMsg}
+        </div>
+      )}
+      {errMsg && (
+        <div style={{
+          background: '#2d1515', border: '1px solid #7f1d1d', borderRadius: 8,
+          padding: '10px 16px', color: '#fca5a5', marginBottom: 16, fontSize: 14,
+        }}>
+          ⚠️ {errMsg}
         </div>
       )}
 
@@ -480,17 +493,7 @@ function BotsTab() {
         </table>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'center' }}>
-        {Array.from({ length: Math.ceil(total / 20) }, (_, i) => i + 1).map(p => (
-          <button key={p} onClick={() => setPage(p)} style={{
-            padding: '6px 12px', background: p === page ? '#7c3aed' : '#1a1d27',
-            color: p === page ? '#fff' : '#94a3b8', border: '1px solid #2d3748',
-            borderRadius: 6, cursor: 'pointer', fontSize: 13,
-          }}>
-            {p}
-          </button>
-        ))}
-      </div>
+      <Paginator page={page} totalPages={Math.ceil(total / 20)} onChange={setPage} />
 
       {confirmDelete && (
         <div style={{

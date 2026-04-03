@@ -23,11 +23,13 @@ model User {
   referralCode String?
   isBanned     Boolean  @default(false)
   lastIp       String?
+  platform     String?  // web|ios|android
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   matchPlayers MatchPlayer[]
   gameStats    UserGameStats[]
+  gameRatings  UserGameRating[]
   soloGameProgress UserSoloGameProgress[]
   invitesCreated Invite[]     @relation("InviteCreator")
   sentFriendships     Friendship[] @relation("FriendshipSender")
@@ -38,6 +40,8 @@ model User {
 
   @@index([rating])
   @@index([userType])
+  @@index([userType, rating])
+  @@index([userType, createdAt])
   @@map("users")
 }
 
@@ -124,6 +128,24 @@ model Invite {
   match   Match? @relation(fields: [matchId], references: [id])
 
   @@map("invites")
+}
+
+// ─── UserGameRating ───────────────────────────────────────────────────────────
+// Stochează ELO, XP și liga per joc (nu per nivel).
+// Separat de User.rating/xp/league care rămân globale (cross-game).
+model UserGameRating {
+  id       String @id @default(uuid())
+  userId   String
+  gameType String
+  rating   Int    @default(1000)
+  xp       Int    @default(0)
+  league   String @default("bronze")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, gameType])
+  @@index([userId])
+  @@map("user_game_ratings")
 }
 
 // ─── UserGameStats ────────────────────────────────────────────────────────────

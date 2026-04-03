@@ -28,6 +28,11 @@ interface Overview {
   matchTimeline: { date: string; count: number }[];
 }
 
+// ─── Types — Peak Hours ─────────────────────────────────────────────────────
+interface PeakHoursData {
+  hours: { hour: number; count: number }[];
+}
+
 // ─── Types — Abandon Stats ───────────────────────────────────────────────────
 interface AbandonWindow {
   total: number;
@@ -135,6 +140,31 @@ function Sparkline({ data, color, height = 56 }: { data: number[]; color: string
   );
 }
 
+// ─── Peak Hours bar chart (inline SVG, no deps) ─────────────────────────────
+function PeakHoursChart({ hours }: { hours: { hour: number; count: number }[] }) {
+  const max = Math.max(...hours.map(h => h.count), 1);
+  const W = 480, H = 72;
+  const barW = Math.floor(W / 24) - 2;
+  return (
+    <svg viewBox={`0 0 ${W} ${H + 20}`} style={{ width: '100%', height: H + 20 }} preserveAspectRatio="none">
+      {hours.map(({ hour, count }) => {
+        const x = (hour / 24) * W + 1;
+        const barH = max > 0 ? (count / max) * H : 0;
+        return (
+          <g key={hour}>
+            <rect x={x} y={H - barH} width={barW} height={barH} fill="#7c3aed" rx={2} fillOpacity={count > 0 ? 0.85 : 0.15} />
+            {hour % 6 === 0 && (
+              <text x={x + barW / 2} y={H + 14} fontSize={8} fill="#64748b" textAnchor="middle">
+                {String(hour).padStart(2, '0')}h
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 // ─── Period selector ─────────────────────────────────────────────────────────
 function PeriodBtn({ p, active, onClick }: { p: string; active: boolean; onClick: () => void }) {
   return (
@@ -155,6 +185,7 @@ export default function StatsPage() {
   const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week');
   const [data, setData] = useState<Overview | null>(null);
   const [abandonData, setAbandonData] = useState<AbandonStats | null>(null);
+  const [peakHours, setPeakHours] = useState<PeakHoursData | null>(null);
   const [abandonWindow, setAbandonWindow] = useState<'7d' | '14d' | '30d'>('7d');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -165,10 +196,12 @@ export default function StatsPage() {
     Promise.all([
       adminApi.get(`/api/admin/stats/overview?period=${p}`),
       adminApi.get('/api/admin/stats/abandon'),
+      adminApi.get('/api/admin/stats/peak-hours'),
     ])
-      .then(([overviewRes, abandonRes]) => {
+      .then(([overviewRes, abandonRes, peakRes]) => {
         setData(overviewRes.data);
         setAbandonData(abandonRes.data);
+        setPeakHours(peakRes.data);
       })
       .catch(() => setError('Eroare la încărcarea statisticilor'))
       .finally(() => setLoading(false));
@@ -359,7 +392,23 @@ export default function StatsPage() {
             })}
           </div>
 
-          {/* ── Row 6: Abandon stats ───────────────────────────────────────── */}
+          {/* ── Row 6: Peak hours ─────────────────────────────────────────── */}
+          {peakHours && (
+            <Card>
+              <SectionTitle>🕐 Ore de vârf — meciuri finalizate (toate timpurile)</SectionTitle>
+              <PeakHoursChart hours={peakHours.hours} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#475569', marginTop: 4 }}>
+                <span>00:00</span>
+                <span style={{ textAlign: 'center' }}>ora zilei (UTC)</span>
+                <span>23:00</span>
+              </div>
+              {peakHours.hours.every(h => h.count === 0) && (
+                <p style={{ color: '#475569', fontSize: 13, marginTop: 8 }}>Nu există meciuri finalizate înregistrate.</p>
+              )}
+            </Card>
+          )}
+
+          {/* ── Row 7: Abandon stats ───────────────────────────────────────── */}
           {abandonData && (() => {
             const win = abandonData.windows[abandonWindow];
             const maxGame = Math.max(...Object.values(win.perGame), 1);

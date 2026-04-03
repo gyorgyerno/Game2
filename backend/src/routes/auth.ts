@@ -79,6 +79,8 @@ router.post('/register', async (req: Request, res: Response) => {
   if (await isIpBanned(clientIp)) return res.status(403).json({ error: 'Acces blocat.' });
 
   const { email, username, otp, referralCode } = parsed.data;
+  const rawPlatform = (req.headers['x-platform'] as string) || (req.body as { platform?: string }).platform || 'web';
+  const platform = (['web', 'ios', 'android'] as string[]).includes(rawPlatform) ? rawPlatform : 'web';
 
   const otpRecord = await prisma.oTP.findUnique({ where: { email } });
   if (!otpRecord || otpRecord.code !== otp || new Date() > otpRecord.expiresAt) {
@@ -96,6 +98,7 @@ router.post('/register', async (req: Request, res: Response) => {
       xp: 0,
       league: 'bronze',
       referralCode: referralCode || null,
+      platform,
     },
   });
 
@@ -142,8 +145,10 @@ router.post('/login', async (req: Request, res: Response) => {
 
   await prisma.oTP.delete({ where: { email } });
 
-  // Save last known IP for potential future banning
-  await prisma.user.update({ where: { id: user.id }, data: { lastIp: clientIp } });
+  // Save last known IP and platform for analytics
+  const rawPlatformL = (req.headers['x-platform'] as string) || (req.body as { platform?: string }).platform || 'web';
+  const platformL = (['web', 'ios', 'android'] as string[]).includes(rawPlatformL) ? rawPlatformL : 'web';
+  await prisma.user.update({ where: { id: user.id }, data: { lastIp: clientIp, platform: platformL } });
 
   const token = jwt.sign({ userId: user.id }, config.jwtSecret, { expiresIn: config.jwtExpiresIn } as jwt.SignOptions);
   return res.json({ token, user: { ...user, league: ratingToLeague(user.rating) } });

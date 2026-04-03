@@ -253,6 +253,15 @@ export interface Invite {
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
+export interface UserGameRating {
+  id: string;
+  userId: string;
+  gameType: GameType;
+  rating: number;
+  xp: number;
+  league: League;
+}
+
 export interface UserGameStats {
   userId: string;
   gameType: GameType;

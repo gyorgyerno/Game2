@@ -25,6 +25,7 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
   const [myMistakes, setMyMistakes] = useState(0);
   const [finished, setFinished] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const progressThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const socket = getSocket();
 
   const rules = GAME_RULES[gameType] || GAME_RULES['integrame'];
@@ -41,8 +42,18 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
       setEffectiveTimeLimit(tl);
       setTimeLeft(tl);
     });
-    socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { players: MatchPlayer[] }) => {
-      setMatch((prev) => prev ? { ...prev, players: data.players } : prev);
+    socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { userId: string; liveScore: number; correctAnswers: number; mistakes: number; finished?: boolean }) => {
+      setMatch((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          players: prev.players.map((p) =>
+            p.userId === data.userId
+              ? { ...p, score: data.liveScore, correctAnswers: data.correctAnswers, mistakes: data.mistakes, ...(data.finished ? { finishedAt: new Date().toISOString() } : {}) }
+              : p
+          ),
+        };
+      });
     });
     socket.on(SOCKET_EVENTS.MATCH_FINISHED, (finalMatch: Match) => {
       setFinished(true);
@@ -76,10 +87,16 @@ export default function DuelArena({ matchId, gameType, userId }: Props) {
     return () => clearInterval(timerRef.current!);
   }, [started, finished, effectiveTimeLimit]);
 
-  // Emit progress on change
+  // Emit progress — throttled 150ms to avoid socket spam on fast answers
   useEffect(() => {
     if (!started || finished) return;
-    socket.emit(SOCKET_EVENTS.PLAYER_PROGRESS, { matchId, correctAnswers: myCorrect, mistakes: myMistakes });
+    if (progressThrottleRef.current) clearTimeout(progressThrottleRef.current);
+    progressThrottleRef.current = setTimeout(() => {
+      socket.emit(SOCKET_EVENTS.PLAYER_PROGRESS, { matchId, correctAnswers: myCorrect, mistakes: myMistakes });
+    }, 150);
+    return () => {
+      if (progressThrottleRef.current) clearTimeout(progressThrottleRef.current);
+    };
   }, [myCorrect, myMistakes, started]);
 
   function handleCorrect() { setMyCorrect((c) => c + 1); }

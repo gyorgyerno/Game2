@@ -145,11 +145,6 @@ async function simulateSingleBot(
         },
       });
 
-      const updated = await prisma.match.findUnique({
-        where: { id: matchId },
-        include: { players: { include: { user: true } } },
-      });
-
       io.to(room).emit(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, {
         userId: botUserId,
         correctAnswers: currentSteps,
@@ -157,7 +152,6 @@ async function simulateSingleBot(
         metrics: {},
         liveScore: finalScore,
         finished: true,
-        players: updated?.players,
       });
 
       logger.debug('[BotGameplaySimulator] bot finished', {
@@ -174,11 +168,6 @@ async function simulateSingleBot(
       data: { score: liveScore, correctAnswers: currentSteps, mistakes: currentMistakes },
     });
 
-    const updated = await prisma.match.findUnique({
-      where: { id: matchId },
-      include: { players: { include: { user: true } } },
-    });
-
     io.to(room).emit(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, {
       userId: botUserId,
       correctAnswers: currentSteps,
@@ -186,7 +175,6 @@ async function simulateSingleBot(
       metrics: {},
       liveScore,
       finished: false,
-      players: updated?.players,
     });
 
     // Dacă a trecut timeLimit, oprește

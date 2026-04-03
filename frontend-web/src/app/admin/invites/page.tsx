@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import adminApi from '@/lib/adminApi';
+import { Paginator } from '@/components/admin/Paginator';
 
 interface Invite {
   id: string;
@@ -21,6 +22,7 @@ export default function AdminInvites() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState('');
+  const [errMsg, setErrMsg] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ gameType: 'integrame', level: 1, maxUses: 10, createdBy: '' });
   const [users, setUsers] = useState<{ id: string; username: string }[]>([]);
@@ -37,11 +39,21 @@ export default function AdminInvites() {
   };
 
   const loadUsers = async () => {
-    const { data } = await adminApi.get('/api/admin/users', { params: { limit: 100 } });
-    setUsers(data.users);
+    try {
+      const { data } = await adminApi.get('/api/admin/users', { params: { limit: 100 } });
+      setUsers(data.users);
+    } catch {
+      // best-effort, not critical
+    }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [page]);
+
+  const err = (text: string) => {
+    setErrMsg(text);
+    setTimeout(() => setErrMsg(''), 3000);
+  };
 
   const msg = (text: string) => {
     setActionMsg(text);
@@ -50,16 +62,24 @@ export default function AdminInvites() {
 
   const createInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    await adminApi.post('/api/admin/invites', form);
-    setShowCreate(false);
-    msg('Invite creat cu succes');
-    load();
+    try {
+      await adminApi.post('/api/admin/invites', form);
+      setShowCreate(false);
+      msg('Invite creat cu succes');
+      load();
+    } catch {
+      err('Eroare la creare invite');
+    }
   };
 
   const deleteInvite = async (id: string) => {
-    await adminApi.delete(`/api/admin/invites/${id}`);
-    msg('Invite șters');
-    load();
+    try {
+      await adminApi.delete(`/api/admin/invites/${id}`);
+      msg('Invite șters');
+      load();
+    } catch {
+      err('Eroare la ștergere invite');
+    }
   };
 
   const copyCode = (code: string) => {
@@ -90,6 +110,14 @@ export default function AdminInvites() {
           padding: '10px 16px', color: '#86efac', marginBottom: 16, fontSize: 14,
         }}>
           ✅ {actionMsg}
+        </div>
+      )}
+      {errMsg && (
+        <div style={{
+          background: '#2d1515', border: '1px solid #7f1d1d', borderRadius: 8,
+          padding: '10px 16px', color: '#fca5a5', marginBottom: 16, fontSize: 14,
+        }}>
+          ⚠️ {errMsg}
         </div>
       )}
 
@@ -152,18 +180,7 @@ export default function AdminInvites() {
         </table>
       </div>
 
-      {/* Pagination */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'center' }}>
-        {Array.from({ length: Math.ceil(total / 20) }, (_, i) => i + 1).map(p => (
-          <button key={p} onClick={() => setPage(p)} style={{
-            padding: '6px 12px', background: p === page ? '#7c3aed' : '#1a1d27',
-            color: p === page ? '#fff' : '#94a3b8', border: '1px solid #2d3748',
-            borderRadius: 6, cursor: 'pointer', fontSize: 13,
-          }}>
-            {p}
-          </button>
-        ))}
-      </div>
+      <Paginator page={page} totalPages={Math.ceil(total / 20)} onChange={setPage} />
 
       {/* Create Modal */}
       {showCreate && (

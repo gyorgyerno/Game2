@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { cleanupGhostRuns, deleteGhostRun, GhostRunRecord, listGhostRuns } from '@/lib/adminApi';
+import { Paginator } from '@/components/admin/Paginator';
 
 export default function AdminGhostRunsPage() {
   const [runs, setRuns] = useState<GhostRunRecord[]>([]);
@@ -42,6 +43,7 @@ export default function AdminGhostRunsPage() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     load(page, search, gameType);
   }, [page]);
@@ -229,20 +231,7 @@ export default function AdminGhostRunsPage() {
           </table>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'center' }}>
-          {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPage(p)}
-              style={{
-                padding: '6px 11px', background: p === page ? '#7c3aed' : '#0f1117',
-                color: p === page ? '#fff' : '#94a3b8', border: '1px solid #2d3748', borderRadius: 6, cursor: 'pointer',
-              }}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
+        <Paginator page={page} totalPages={totalPages} onChange={setPage} />
       </section>
     </div>
   );

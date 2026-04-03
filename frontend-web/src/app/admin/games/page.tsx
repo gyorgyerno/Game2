@@ -16,6 +16,7 @@ export default function AdminGamesPage() {
   const [games, setGames] = useState<AdminGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  const [errMsg, setErrMsg] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -31,11 +32,17 @@ export default function AdminGamesPage() {
     load();
   }, []);
 
+  const err = (text: string) => { setErrMsg(text); setTimeout(() => setErrMsg(''), 3000); };
+
   const toggle = async (game: AdminGame) => {
-    await adminApi.patch(`/api/admin/games/${game.id}`, { isActive: !game.isActive });
-    setMsg(`${game.name} este acum ${!game.isActive ? 'activ' : 'inactiv'}.`);
-    setTimeout(() => setMsg(''), 2500);
-    load();
+    try {
+      await adminApi.patch(`/api/admin/games/${game.id}`, { isActive: !game.isActive });
+      setMsg(`${game.name} este acum ${!game.isActive ? 'activ' : 'inactiv'}.`);
+      setTimeout(() => setMsg(''), 2500);
+      load();
+    } catch {
+      err('Eroare la modificare joc');
+    }
   };
 
   const move = async (index: number, direction: 'up' | 'down') => {
@@ -48,14 +55,17 @@ export default function AdminGamesPage() {
     const currentOrder = current.order ?? (index + 1) * 10;
     const targetOrder = target.order ?? (targetIndex + 1) * 10;
 
-    await Promise.all([
-      adminApi.patch(`/api/admin/games/${current.id}/order`, { order: targetOrder }),
-      adminApi.patch(`/api/admin/games/${target.id}/order`, { order: currentOrder }),
-    ]);
-
-    setMsg(`Ordinea a fost actualizată.`);
-    setTimeout(() => setMsg(''), 2500);
-    load();
+    try {
+      await Promise.all([
+        adminApi.patch(`/api/admin/games/${current.id}/order`, { order: targetOrder }),
+        adminApi.patch(`/api/admin/games/${target.id}/order`, { order: currentOrder }),
+      ]);
+      setMsg(`Ordinea a fost actualizată.`);
+      setTimeout(() => setMsg(''), 2500);
+      load();
+    } catch {
+      err('Eroare la reordonare');
+    }
   };
 
   return (
@@ -73,6 +83,14 @@ export default function AdminGamesPage() {
           padding: '10px 16px', color: '#86efac', marginBottom: 16, fontSize: 14,
         }}>
           ✅ {msg}
+        </div>
+      )}
+      {errMsg && (
+        <div style={{
+          background: '#2d1515', border: '1px solid #7f1d1d', borderRadius: 8,
+          padding: '10px 16px', color: '#fca5a5', marginBottom: 16, fontSize: 14,
+        }}>
+          ⚠️ {errMsg}
         </div>
       )}
 

@@ -1,8 +1,14 @@
 {
-  "current": {
-    "id": "default-bot-config",
-    "enabled": true,
-    "maxBotsOnline": 8
+  "/api/admin/stats/peak-hours": {
+    "status": 401,
+    "body": {
+      "error": "Token invalid sau expirat"
+    }
   },
-  "alreadyEnabled": true
+  "/api/admin/dashboard": {
+    "status": 401,
+    "body": {
+      "error": "Token invalid sau expirat"
+    }
+  }
 }

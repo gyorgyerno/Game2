@@ -5,7 +5,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import { Camera, Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { statsApi, usersApi, api } from '@/lib/api';
-import { UserGameStats } from '@integrame/shared';
+import { UserGameStats, UserGameRating } from '@integrame/shared';
 import Navbar from '@/components/Navbar';
 import { useGamesCatalog } from '@/games/useGamesCatalog';
 
@@ -14,6 +14,7 @@ export default function ProfilePage() {
   const games = useGamesCatalog();
   const { user, token, fetchMe, _hasHydrated } = useAuthStore();
   const [stats, setStats] = useState<UserGameStats[]>([]);
+  const [gameRatings, setGameRatings] = useState<UserGameRating[]>([]);
   const [selectedGame, setSelectedGame] = useState('integrame');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
@@ -31,6 +32,7 @@ export default function ProfilePage() {
     if (!token) { router.push('/login'); return; }
     fetchMe();
     statsApi.getMyStats().then((r) => setStats(r.data)).catch(() => {});
+    statsApi.getMyGameRatings().then((r) => setGameRatings(r.data)).catch(() => {});
     statsApi.getMazeSoloProgress().then((r) => {
       const completed = Array.isArray(r.data?.completedLevels) ? (r.data.completedLevels as number[]) : [];
       const entries = Array.isArray(r.data?.entries) ? r.data.entries : [];
@@ -88,11 +90,12 @@ export default function ProfilePage() {
   if (!_hasHydrated) return <div className="min-h-screen" style={{ background: '#020617' }} />;
 
   const currentStats = stats.find((s) => s.gameType === selectedGame);
+  const currentGameRating = gameRatings.find((r) => r.gameType === selectedGame);
   const rawElo = currentStats?.eloHistory;
   const eloHistory: { date: string; rating: number }[] = Array.isArray(rawElo)
     ? rawElo
     : (typeof rawElo === 'string' ? (() => { try { return JSON.parse(rawElo); } catch { return []; } })() : []);
-  const currentElo = eloHistory.length > 0 ? eloHistory[eloHistory.length - 1].rating : null;
+  const currentElo = currentGameRating?.rating ?? (eloHistory.length > 0 ? eloHistory[eloHistory.length - 1].rating : null);
 
   if (!user) return null;
 
@@ -134,9 +137,9 @@ export default function ProfilePage() {
             <p className="text-slate-400 text-sm">{user.email}</p>
             {uploadError && <p className="text-red-400 text-xs mt-1">{uploadError}</p>}
             <div className="flex gap-4 mt-2">
-              <div><span className="text-slate-500 text-xs">Rating</span><br /><span className="font-bold text-emerald-400">{user.rating}</span></div>
-              <div><span className="text-slate-500 text-xs">XP</span><br /><span className="font-bold text-yellow-400">{user.xp}</span></div>
-              <div><span className="text-slate-500 text-xs">Ligă</span><br /><span className={`badge-${user.league}`}>{user.league}</span></div>
+              <div><span className="text-slate-500 text-xs">Rating global</span><br /><span className="font-bold text-emerald-400">{user.rating}</span></div>
+              <div><span className="text-slate-500 text-xs">XP global</span><br /><span className="font-bold text-yellow-400">{user.xp}</span></div>
+              <div><span className="text-slate-500 text-xs">Ligă globală</span><br /><span className={`badge-${user.league}`}>{user.league}</span></div>
             </div>
           </div>
         </div>
@@ -158,11 +161,11 @@ export default function ProfilePage() {
         {currentElo !== null && (
           <div className="rounded-[36px] border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.5)] p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold">Evoluție ELO – {selectedGame}</h2>
+              <h2 className="text-lg font-bold">ELO – {selectedGame}</h2>
               <div className="flex items-center gap-3">
                 <span className="text-2xl font-bold text-sky-400">{currentElo}</span>
-                <span className={`text-xs font-semibold px-2 py-1 rounded-full ${currentStats?.gameType ? 'bg-amber-900/40 text-amber-300 border border-amber-700/50' : 'bg-slate-800 text-slate-400'}`}>
-                  {user.league}
+                <span className={`text-xs font-semibold px-2 py-1 rounded-full badge-${currentGameRating?.league ?? user.league}`}>
+                  {currentGameRating?.league ?? user.league}
                 </span>
               </div>
             </div>
@@ -185,13 +188,13 @@ export default function ProfilePage() {
         )}
 
         {/* XP Chart */}
-        {(xpHistory.length > 0 || user.xp > 0) && (
+        {(xpHistory.length > 0 || (currentGameRating?.xp ?? 0) > 0 || user.xp > 0) && (
           <div className="rounded-[36px] border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.5)] p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold">Evoluție XP – {selectedGame}</h2>
+              <h2 className="text-lg font-bold">XP – {selectedGame}</h2>
               <div className="flex items-center gap-2">
                 <span className="text-2xl font-bold text-yellow-400">
-                  {xpHistory.length > 0 ? xpHistory[xpHistory.length - 1].xp : user.xp}
+                  {currentGameRating?.xp ?? (xpHistory.length > 0 ? xpHistory[xpHistory.length - 1].xp : user.xp)}
                 </span>
                 <span className="text-xs text-slate-400">XP câștigate</span>
               </div>

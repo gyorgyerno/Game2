@@ -60,6 +60,7 @@ function GamePlayPageInner({ params }: PageProps) {
   const [mounted, setMounted] = useState(false);
   const mountTimeRef = useRef<number>(0);
   const isRefreshingRef = useRef(false);
+  const progressThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staticRules = GAME_RULES[canonicalGameType] || GAME_RULES['integrame'];
   const [serverTimeLimit, setServerTimeLimit] = useState<number>(staticRules.timeLimit);
 
@@ -166,8 +167,18 @@ function GamePlayPageInner({ params }: PageProps) {
       setStarted(true);
       if (seed !== undefined) setMazeSeed(seed);
     });
-    socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { players: MatchPlayer[] }) => {
-      setMatch((prev) => prev ? { ...prev, players: data.players } : prev);
+    socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { userId: string; liveScore: number; correctAnswers: number; mistakes: number; finished?: boolean }) => {
+      setMatch((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          players: prev.players.map((p) =>
+            p.userId === data.userId
+              ? { ...p, score: data.liveScore, correctAnswers: data.correctAnswers, mistakes: data.mistakes, ...(data.finished ? { finishedAt: new Date().toISOString() } : {}) }
+              : p
+          ),
+        };
+      });
     });
     socket.on(SOCKET_EVENTS.MATCH_FINISHED, (final: Match) => {
       setFinished(true);
@@ -250,8 +261,12 @@ function GamePlayPageInner({ params }: PageProps) {
     setWrongWords(mistakes);
     if (metrics) setLatestMetrics(metrics);
     if (!matchId) return;
-    const socket = getSocket();
-    socket.emit(SOCKET_EVENTS.PLAYER_PROGRESS, { matchId, correctAnswers, mistakes, metrics });
+    // Throttle 150ms — prevents socket spam when player answers quickly
+    if (progressThrottleRef.current) clearTimeout(progressThrottleRef.current);
+    progressThrottleRef.current = setTimeout(() => {
+      const socket = getSocket();
+      socket.emit(SOCKET_EVENTS.PLAYER_PROGRESS, { matchId, correctAnswers, mistakes, metrics });
+    }, 150);
   }
 
   function handleFinish(correctAnswers: number, mistakes: number, metrics?: Record<string, unknown>) {

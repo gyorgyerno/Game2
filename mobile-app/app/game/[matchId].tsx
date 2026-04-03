@@ -73,8 +73,18 @@ export default function GamePlayScreen() {
         setTimeLeft(rules.timeLimit);
         // mazeSeed rezervat pentru viitoarea implementare de labirint pe mobile
       });
-      socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { players: MatchPlayer[] }) => {
-        setMatch((prev) => prev ? { ...prev, players: data.players } : prev);
+      socket.on(SOCKET_EVENTS.MATCH_PROGRESS_UPDATE, (data: { userId: string; liveScore: number; correctAnswers: number; mistakes: number; finished?: boolean }) => {
+        setMatch((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            players: prev.players.map((p) =>
+              p.userId === data.userId
+                ? { ...p, score: data.liveScore, correctAnswers: data.correctAnswers, mistakes: data.mistakes, ...(data.finished ? { finishedAt: new Date().toISOString() } : {}) }
+                : p
+            ),
+          };
+        });
       });
       socket.on(SOCKET_EVENTS.MATCH_FINISHED, (final: Match) => {
         setFinished(true);

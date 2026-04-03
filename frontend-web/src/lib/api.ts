@@ -109,6 +109,8 @@ export const invitesApi = {
 export const statsApi = {
   getMyStats: (gameType?: string, level?: number) =>
     api.get('/stats/me', { params: { gameType, level } }),
+  getMyGameRatings: () =>
+    api.get('/stats/me/game-ratings'),
   getUserStats: (userId: string, gameType?: string, level?: number) =>
     api.get(`/stats/${userId}`, { params: { gameType, level } }),
   getIntegrameSoloProgress: () =>

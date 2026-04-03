@@ -5,8 +5,8 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 
 const NAV = [
-  { href: '/admin', label: 'Dashboard', icon: '📊' },
-  { href: '/admin/stats', label: 'Statistici', icon: '📈' },
+  { href: '/admin', label: 'Mission Control', icon: '🛰️' },
+  { href: '/admin/stats', label: 'Analytics', icon: '📈' },
   { href: '/admin/games', label: 'Jocuri', icon: '🕹️' },
   { href: '/admin/simulated-players', label: 'Simulated AI', icon: '🤖' },
   { href: '/admin/ghost-runs', label: 'Ghost Runs', icon: '👻' },
@@ -14,7 +14,6 @@ const NAV = [
   { href: '/admin/matches', label: 'Meciuri', icon: '🎮' },
   { href: '/admin/contests', label: 'Concursuri', icon: '🏆' },
   { href: '/admin/invites', label: 'Invite Codes', icon: '🎫' },
-  { href: '/admin/logs', label: 'Loguri', icon: '📋' },
   { href: '/admin/settings', label: 'Settings', icon: '⚙️' },
 ];
 
@@ -22,15 +21,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const pathname = usePathname();
   const [admin, setAdmin] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (pathname === '/admin/login') return;
+    if (pathname === '/admin/login') { setReady(true); return; }
     const token = localStorage.getItem('adminToken');
     const username = localStorage.getItem('adminUsername');
     if (!token) {
       router.push('/admin/login');
     } else {
       setAdmin(username);
+      setReady(true);
     }
   }, [pathname, router]);
 
@@ -41,6 +42,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   };
 
   if (pathname === '/admin/login') return <>{children}</>;
+  if (!ready) return <div style={{ background: '#0f1117', minHeight: '100vh' }} />;
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#0f1117', color: '#e2e8f0', fontFamily: 'system-ui, sans-serif' }}>
@@ -48,6 +50,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <aside style={{
         width: 220, background: '#1a1d27', borderRight: '1px solid #2d3748',
         display: 'flex', flexDirection: 'column', padding: '24px 0', flexShrink: 0,
+        position: 'sticky', top: 0, height: '100vh', overflowY: 'auto',
       }}>
         <div style={{ padding: '0 20px 24px', borderBottom: '1px solid #2d3748' }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#7c3aed' }}>⚡ Integrame</div>

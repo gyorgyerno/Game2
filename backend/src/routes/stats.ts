@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import prisma from '../prisma';
+import { systemConfigService } from '../services/SystemConfigService';
 
 const router = Router();
 const INTEGRAME_SOLO_GAME_TYPE = 'integrame_solo';
@@ -157,6 +158,79 @@ router.post('/solo/maze/complete', requireAuth, async (req: AuthRequest, res: Re
   });
 
   return res.json({ ok: true, level, bestScore: updated.bestScore });
+});
+
+// GET /api/stats/me/game-ratings — ELO/XP/ligă per joc pentru userul curent
+// Backfill lazy per gameType: dacă un joc are UserGameStats dar nu are UserGameRating, îl calculează.
+router.get('/me/game-ratings', requireAuth, async (req: AuthRequest, res: Response) => {
+  const existingRatings = await prisma.userGameRating.findMany({
+    where: { userId: req.userId },
+  });
+  const existingGameTypes = new Set(existingRatings.map((r) => r.gameType));
+
+  // Găsim UserGameStats per joc (sursa cea mai corectă pentru ELO history)
+  const allGameStats = await prisma.userGameStats.findMany({
+    where: { userId: req.userId },
+  });
+
+  // Grupăm per gameType normalizat
+  const statsByGame: Record<string, { totalMatches: number; lastElo: number | null }> = {};
+  for (const gs of allGameStats) {
+    const gt = gs.gameType === 'maze' ? 'labirinturi' : gs.gameType;
+    if (!statsByGame[gt]) statsByGame[gt] = { totalMatches: 0, lastElo: null };
+    statsByGame[gt].totalMatches += gs.totalMatches;
+    // ELO din eloHistory — ultimul entry e cel mai recent
+    try {
+      const hist: { date: string; rating: number }[] = JSON.parse(gs.eloHistory as string);
+      if (hist.length > 0) {
+        const lastRating = hist[hist.length - 1].rating;
+        if (statsByGame[gt].lastElo === null || lastRating > 0) {
+          statsByGame[gt].lastElo = lastRating;
+        }
+      }
+    } catch { /* eloHistory invalid JSON */ }
+  }
+
+  // Dacă nu avem UserGameStats (meciuri vechi fără stats), fallback pe MatchPlayer
+  if (Object.keys(statsByGame).length === 0) {
+    const allMatches = await prisma.match.findMany({
+      where: { status: 'finished', players: { some: { userId: req.userId! } } },
+      select: { gameType: true },
+    });
+    for (const m of allMatches) {
+      const gt = m.gameType === 'maze' ? 'labirinturi' : m.gameType;
+      if (!statsByGame[gt]) statsByGame[gt] = { totalMatches: 0, lastElo: null };
+      statsByGame[gt].totalMatches += 1;
+    }
+  }
+
+  // Distribuim User.xp proporțional pe jocuri
+  const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { xp: true, rating: true } });
+  const totalMatchesAllGames = Object.values(statsByGame).reduce((s, g) => s + g.totalMatches, 0);
+
+  for (const [gameType, { totalMatches, lastElo }] of Object.entries(statsByGame)) {
+    if (existingGameTypes.has(gameType)) continue; // deja există, nu suprascrie
+
+    // ELO: dacă jocul ăsta are TOATE meciurile userului → folosim User.rating (cel mai actualizat)
+    // Altfel folosim ultimul entry din eloHistory
+    const isOnlyGame = totalMatchesAllGames === totalMatches;
+    const rating = isOnlyGame ? (user?.rating ?? 1000) : (lastElo ?? 1000);
+    // XP: distribuim User.xp proporțional după nr. meciuri
+    const xpFraction = totalMatchesAllGames > 0 ? totalMatches / totalMatchesAllGames : 1;
+    const xp = Math.round((user?.xp ?? 0) * xpFraction);
+    const league = systemConfigService.ratingToLeague(rating);
+
+    await prisma.userGameRating.upsert({
+      where: { userId_gameType: { userId: req.userId!, gameType } },
+      create: { userId: req.userId!, gameType, rating, xp, league },
+      update: { rating, xp, league },
+    });
+  }
+
+  const ratings = await prisma.userGameRating.findMany({
+    where: { userId: req.userId },
+  });
+  return res.json(ratings);
 });
 
 // GET /api/stats/xp-history?gameType=integrame

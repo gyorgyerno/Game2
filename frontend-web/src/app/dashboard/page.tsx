@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Trophy, Play, ChevronDown, BookOpen, Star, Link2, Copy, Check, X, Lock } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { matchesApi, invitesApi, statsApi, api, contestsApi } from '@/lib/api';
-import { Match, UserGameStats } from '@integrame/shared';
+import { Match, UserGameStats, UserGameRating } from '@integrame/shared';
 import Navbar from '@/components/Navbar';
 import { hydrateIntegrameProgressFromServer, isCompleted, isUnlocked } from '@/store/gameProgress';
 import { useGamesCatalog } from '@/games/useGamesCatalog';
@@ -29,7 +29,6 @@ export default function DashboardPage() {
   const { user, fetchMe, token, _hasHydrated } = useAuthStore();
   const [selectedGame, setSelectedGame] = useState('integrame');
   const [selectedLevel, setSelectedLevel] = useState(1);
-  const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(false);
   const [playError, setPlayError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -48,6 +47,7 @@ export default function DashboardPage() {
   const [pendingRandomMatchId, setPendingRandomMatchId] = useState('');
   const [randomAcceptSecondsLeft, setRandomAcceptSecondsLeft] = useState<number | null>(null);
   const [randomDecisionLoading, setRandomDecisionLoading] = useState(false);
+  const [selectedDashboardGame, setSelectedDashboardGame] = useState<string | null>(null);
   const [selectedSoloGame, setSelectedSoloGame] = useState('integrame');
   const [mazeCompleted, setMazeCompleted] = useState<Set<string>>(new Set());
   const [selectedGameLevels, setSelectedGameLevels] = useState<PublicLevelConfig[]>([]);
@@ -57,6 +57,8 @@ export default function DashboardPage() {
   const [soloDashMounted, setSoloDashMounted] = useState(false);
   const [activeContests, setActiveContests] = useState<any[]>([]);
   const [joiningContest, setJoiningContest] = useState<string | null>(null);
+  const [gameRatings, setGameRatings] = useState<UserGameRating[]>([]);
+  const [recentMatches, setRecentMatches] = useState<Match[]>([]);
 
   const requestedGameRaw = (searchParams.get('game') || '').toLowerCase();
   const requestedGame = requestedGameRaw === 'maze' ? 'labirinturi' : requestedGameRaw;
@@ -77,8 +79,9 @@ export default function DashboardPage() {
     if (!_hasHydrated) return;
     if (!token) { router.push('/login'); return; }
     fetchMe();
-    matchesApi.getHistory().then((r) => setRecentMatches(r.data)).catch(() => {});
     statsApi.getMyStats().then((r) => setStats(r.data)).catch(() => {});
+    statsApi.getMyGameRatings().then((r) => setGameRatings(r.data)).catch(() => {});
+    matchesApi.getHistory().then((r) => setRecentMatches(r.data)).catch(() => {});
     const fetchContests = () =>
       contestsApi.list().then((r) => setActiveContests(r.data.contests ?? [])).catch(() => {});
     fetchContests();
@@ -128,13 +131,35 @@ export default function DashboardPage() {
   }, [games, selectedGame]);
 
   useEffect(() => {
-    if (!requestedGame || games.length === 0) return;
+    if (games.length === 0) return;
+    if (!requestedGame) {
+      if (selectedDashboardGame !== null) {
+        setSelectedDashboardGame(null);
+      }
+      return;
+    }
     const exists = games.some((g) => g.id === requestedGame);
-    if (exists && requestedGame !== selectedGame) {
-      setSelectedGame(requestedGame);
+    if (exists) {
+      if (requestedGame !== selectedGame) {
+        setSelectedGame(requestedGame);
+      }
+      if (requestedGame !== selectedSoloGame) {
+        setSelectedSoloGame(requestedGame);
+      }
+      if (requestedGame !== selectedDashboardGame) {
+        setSelectedDashboardGame(requestedGame);
+      }
       setSelectedLevel(1);
     }
-  }, [requestedGame, games, selectedGame]);
+  }, [requestedGame, games, selectedGame, selectedSoloGame, selectedDashboardGame]);
+
+  useEffect(() => {
+    if (!selectedDashboardGame || games.length === 0) return;
+    const exists = games.some((game) => game.id === selectedDashboardGame);
+    if (!exists) {
+      setSelectedDashboardGame(null);
+    }
+  }, [games, selectedDashboardGame]);
 
   useEffect(() => {
     if (games.length === 0) return;
@@ -348,6 +373,21 @@ export default function DashboardPage() {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
 
+  function handleOpenGameDetails(gameId: string) {
+    setSelectedDashboardGame(gameId);
+    setSelectedGame(gameId);
+    setSelectedSoloGame(gameId);
+    setSelectedLevel(1);
+    setShowAiThemes(false);
+    router.replace(`/dashboard?game=${gameId}`);
+  }
+
+  function handleBackToGameCards() {
+    setSelectedDashboardGame(null);
+    setShowAiThemes(false);
+    router.replace('/dashboard');
+  }
+
   if (!user) return <div className="min-h-screen flex items-center justify-center" style={{ background: '#020617' }}><div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>;
 
   // Level unlock logic: each level requires winsToUnlock wins at the previous level (configured in admin)
@@ -375,23 +415,47 @@ export default function DashboardPage() {
   const effectiveLevel = unlockedLevels.has(selectedLevel) ? selectedLevel : firstAvailableLevel;
   // Next level that is locked (to show requirement hint)
   const nextLockedLevel = availableLevels.slice(1).find((lvl) => !unlockedLevels.has(lvl));
-  const glassCard = 'rounded-[36px] border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.5)]';
+  const glassCard = 'rounded-[28px] border border-white/10 bg-white/[0.06] backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.2)]';
   const levelCard = 'rounded-[22px] border border-slate-700 bg-slate-800/80 hover:bg-slate-700/80 transition-all hover:scale-[1.02] min-h-[140px] md:min-h-[160px] flex flex-col items-center justify-center shadow-lg shadow-black/30';
   const lockedLevelCard = 'rounded-[22px] border border-slate-700/50 bg-slate-800/40 opacity-60 min-h-[120px] md:min-h-[130px] flex flex-col items-center justify-center';
   const soloActionBtnBase = 'mt-4 md:mt-8 mx-auto w-full max-w-[170px] px-4 md:px-6 py-2.5 rounded-full text-[15px] font-semibold inline-flex items-center justify-center gap-2';
   const soloPlayBtn = `${soloActionBtnBase} bg-emerald-600 text-white hover:bg-emerald-500`;
   const soloDisabledBtn = `${soloActionBtnBase} bg-transparent border border-slate-600 text-slate-500 cursor-not-allowed`;
+  const showGameDetails = !!selectedDashboardGame;
+  const soloGameInView = selectedDashboardGame ?? selectedSoloGame;
+  const selectedDashboardGameDef = games.find((g) => g.id === selectedDashboardGame);
+  const selectedGameRating = gameRatings.find((r) => r.gameType === selectedDashboardGame);
 
   return (
     <>
-      <div className="min-h-screen" style={{ background: '#020617' }}>
+      <div className="min-h-screen relative overflow-hidden" style={{ background: '#020617' }}>
+        {/* Ambient background — same as Register */}
+        <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(ellipse 60% 50% at 20% 20%, rgba(52,211,153,0.12) 0%, transparent 70%)' }} />
+        <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(ellipse 50% 40% at 80% 80%, rgba(139,92,246,0.10) 0%, transparent 70%)' }} />
+        <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(ellipse 40% 35% at 60% 10%, rgba(56,189,248,0.07) 0%, transparent 70%)' }} />
+        {/* Left side decorative character — only on main dashboard */}
+        {!showGameDetails && (
+        <div className="pointer-events-none absolute left-0 bottom-0 w-[700px] h-screen z-0 hidden xl:block">
+          <img
+            src="/dashboard-bg-left.png"
+            alt=""
+            className="w-full h-full object-cover object-left"
+            style={{
+              maskImage: 'linear-gradient(to right, black 55%, transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to right, black 55%, transparent 100%)',
+              filter: 'drop-shadow(0 0 60px rgba(251,146,60,0.30)) brightness(1.05)',
+            }}
+          />
+        </div>
+        )}
       <Navbar />
       <main className="relative overflow-hidden max-w-[1700px] mx-auto px-3 md:px-8 py-8 md:py-10">
         <div className="space-y-8">
 
         {/* Concursuri active / viitoare */}
-        {activeContests.filter(c => c.status === 'waiting' || c.status === 'live').length > 0 && (
-          <div className="space-y-3">
+        {!showGameDetails && activeContests.filter(c => c.status === 'waiting' || c.status === 'live').length > 0 && (
+          <div className="space-y-3 flex flex-col items-center">
+          <div className="w-full max-w-[40rem] space-y-3">
             {activeContests.filter(c => c.status === 'waiting' || c.status === 'live').map((c) => {
               const isLive = c.status === 'live';
               const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -420,12 +484,11 @@ export default function DashboardPage() {
                           {isLive ? '● LIVE' : '⏳ În așteptare'}
                         </span>
                         <h3 className="text-white font-bold text-base md:text-lg truncate">{c.name}</h3>
+                        {c.gameType && <span className="text-xs text-slate-400">🎮 {c.gameType === 'maze' ? 'Labirinturi' : c.gameType === 'integrame' ? 'Integrame' : c.gameType}</span>}
                       </div>
-                      {c.description && (
-                        <p className="text-slate-300/70 text-sm mt-0.5 line-clamp-1">{c.description}</p>
-                      )}
                       <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5 text-xs text-slate-400">
                         <span>🕒 {isLive ? `Până la ${endDate}` : `Start: ${startDate}`} <span className="text-slate-500 text-[10px]">({tzShort})</span></span>
+                        {!isLive && <span>🏁 End: {endDate}</span>}
                         <span>👥 {c.registeredCount}{c.maxPlayers ? `/${c.maxPlayers}` : ''} înscriși</span>
                         {c.rounds.length > 0 && (
                           <span>🎯 {c.rounds.length} rondă{c.rounds.length > 1 ? 'e' : ''}</span>
@@ -470,25 +533,93 @@ export default function DashboardPage() {
                         {joiningContest === c.slug ? 'Se procesează...' : '🏆 Înscrie-te'}
                       </button>
                     )}
-                    <Link
-                      href={`/contest/${c.slug}`}
-                      className="px-3 py-2.5 rounded-full text-sm bg-white/10 hover:bg-white/20 text-white transition-colors"
-                    >
-                      Detalii
-                    </Link>
+                    {!c.isRegistered && (
+                      <Link
+                        href={`/contest/${c.slug}`}
+                        className="px-3 py-2.5 rounded-full text-sm bg-white/10 hover:bg-white/20 text-white transition-colors"
+                      >
+                        Detalii
+                      </Link>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
+          </div>
+        )}
+
+        {!showGameDetails && (
+          <div className="flex flex-col items-center">
+            <div className="mb-4 text-center">
+              {user?.username && (
+                <p className="text-slate-400 text-sm mb-1">Bună, <span className="text-white font-semibold">{user.username}</span>! 👋</p>
+              )}
+              <h2 className="text-2xl font-bold">Alege jocul</h2>
+              <p className="text-[15px] text-slate-300/80 mt-0.5">Intră în detalii pentru jocul dorit, apoi începi în modul grup sau solo.</p>
+            </div>
+            <div className="flex flex-col gap-3 w-full max-w-[40rem]">
+              {games.map((game) => {
+                const gr = gameRatings.find((r) => r.gameType === game.id);
+                const gs = stats.filter((s) => s.gameType === game.id);
+                const totalWins = gs.reduce((sum, s) => sum + s.wins, 0);
+                const totalMatches = gs.reduce((sum, s) => sum + s.totalMatches, 0);
+                return (
+                <button
+                  key={game.id}
+                  type="button"
+                  onClick={() => handleOpenGameDetails(game.id)}
+                  className="text-left rounded-2xl border border-white/10 bg-white/[0.06] hover:bg-white/[0.11] backdrop-blur-xl shadow-[0_4px_16px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.10)] transition-all p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xl font-bold text-white">{game.emoji} {game.label}</p>
+                      <p className="text-sm text-slate-300 mt-1">{game.supportsSolo ? 'Grup + Solo' : 'Grup'}</p>
+                    </div>
+                    <span className="rounded-full px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shrink-0 transition-colors">
+                      ▶ Joacă acum
+                    </span>
+                  </div>
+                  {gr ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-900/50 text-sky-300 border border-sky-700/40">ELO {gr.rating}</span>
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-yellow-900/50 text-yellow-300 border border-yellow-700/40">XP {gr.xp}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold badge-${gr.league}`}>{gr.league}</span>
+                      {totalMatches > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-900/50 text-emerald-300 border border-emerald-700/40">{totalWins}V / {totalMatches - totalWins}Î</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-xs text-emerald-400/80">✨ Începe primul meci!</div>
+                  )}
+                </button>
+                );
+              })}
+            </div>
+          </div>
         )}
 
         {/* Play CTA */}
+        {showGameDetails && (
         <div className={`${glassCard} p-5 md:p-6`}>
           <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <h2 className="text-2xl font-bold">Joacă în grup</h2>
-              <p className="text-[15px] text-slate-300/80 mt-0.5">Pasul 1: alege jocul și nivelul. Pasul 2: alege cum vrei să joci.</p>
+              <button
+                type="button"
+                onClick={handleBackToGameCards}
+                className="text-xs font-semibold text-slate-300 hover:text-white mb-2"
+              >
+                ← Înapoi la lista de jocuri
+              </button>
+              <h2 className="text-2xl font-bold">Joacă în grup · {selectedDashboardGameDef?.emoji} {selectedDashboardGameDef?.label}</h2>
+              <p className="text-[15px] text-slate-300/80 mt-0.5">Alege nivelul și modul de intrare în meci.</p>
+              {selectedGameRating && (
+                <div className="flex gap-3 mt-2 text-xs font-semibold">
+                  <span className="px-2 py-0.5 rounded-full bg-sky-900/50 text-sky-300 border border-sky-700/40">ELO {selectedGameRating.rating}</span>
+                  <span className="px-2 py-0.5 rounded-full bg-yellow-900/50 text-yellow-300 border border-yellow-700/40">XP {selectedGameRating.xp}</span>
+                  <span className={`px-2 py-0.5 rounded-full badge-${selectedGameRating.league}`}>{selectedGameRating.league}</span>
+                </div>
+              )}
             </div>
             <Link href={`/games/${selectedGame}/leaderboard?level=${effectiveLevel}`} className="rounded-full px-4 py-2.5 text-[15px] font-semibold bg-white/10 hover:bg-white/20 transition-colors inline-flex items-center gap-2">
               <Trophy size={16} /> Clasament
@@ -497,14 +628,15 @@ export default function DashboardPage() {
           <div className="space-y-4">
             <div className="rounded-2xl px-3 py-4 grid grid-cols-1 md:grid-cols-[minmax(220px,320px)_minmax(220px,320px)] md:justify-center gap-2.5">
               <div>
-                <label className="block text-xs text-slate-300 mb-1">Joc</label>
+                <label className="block text-xs text-slate-300 mb-1">Joc selectat</label>
                 <div className="relative">
                   <select
                     value={selectedGame}
                     onChange={(e) => setSelectedGame(e.target.value)}
-                      className="input rounded-full appearance-none pr-8 text-[15px] bg-slate-800/80 border-slate-600 text-white focus:ring-emerald-500"
+                    disabled
+                    className="input rounded-full appearance-none pr-8 text-[15px] bg-slate-800/80 border-slate-600 text-white focus:ring-emerald-500 disabled:opacity-100 disabled:cursor-default"
                   >
-                    {games.map((g) => (
+                    {games.filter((g) => g.id === selectedDashboardGame).map((g) => (
                       <option key={g.id} value={g.id}>{g.emoji} {g.label}</option>
                     ))}
                   </select>
@@ -632,35 +764,24 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+        )}
 
         {/* Solo */}
+        {showGameDetails && (
         <div className={`${glassCard} p-6 md:p-8`}>
           <div className="mb-4">
             <div>
               <h2 className="text-2xl font-bold flex items-center gap-2">
                 <BookOpen size={20} className="text-purple-400" />
-                Solo
+                Solo · {selectedDashboardGameDef?.emoji} {selectedDashboardGameDef?.label}
               </h2>
               <p className="text-slate-400 text-sm mt-0.5">
-                Alege jocul pe care vrei să îl joci singur
+                Progres și niveluri solo pentru jocul selectat
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap justify-center gap-2 mb-4">
-            {games.map((game) => (
-              <button
-                key={game.id}
-                onClick={() => setSelectedSoloGame(game.id)}
-                className={selectedSoloGame === game.id ? 'text-[15px] rounded-full px-7 py-2.5 bg-amber-300 text-slate-950 font-semibold' : 'text-[15px] rounded-full px-7 py-2.5 bg-white/10 border border-white/20 text-slate-100 hover:bg-white/15 font-semibold'}
-              >
-                {game.emoji} {game.label}
-                {!game.supportsSolo && <span className="text-[10px] opacity-70 ml-1">(în curând)</span>}
-              </button>
-            ))}
-          </div>
-
-          {selectedSoloGame === 'integrame' ? (
+          {soloGameInView === 'integrame' ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {(integrameSoloLevels.length > 0 ? integrameSoloLevels : [1,2,3,4,5].map((l) => ({ level: l, displayName: `Nivel ${l}`, winsToUnlock: 3, gamesPerLevel: 3, maxPlayers: 2 }))).map((cfg) => {
               const lvl = cfg.level;
@@ -730,7 +851,7 @@ export default function DashboardPage() {
               );
             })}
           </div>
-          ) : selectedSoloGame === 'labirinturi' ? (
+          ) : soloGameInView === 'labirinturi' ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
               {(mazeSoloLevels.length > 0 ? mazeSoloLevels : [1, 2, 3, 4, 5].map((level) => ({ level, displayName: `Nivel ${level}`, winsToUnlock: 5, gamesPerLevel: 4, maxPlayers: 2 }))).map((cfg) => {
                 const lvl = cfg.level;
@@ -800,43 +921,70 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-5 text-sm text-violet-100/90">
-              Modul solo pentru <span className="font-semibold text-white">{games.find((g) => g.id === selectedSoloGame)?.label}</span> nu este încă disponibil.
+              Modul solo pentru <span className="font-semibold text-white">{games.find((g) => g.id === soloGameInView)?.label}</span> nu este încă disponibil.
               Când va fi activat, îl vei putea porni direct din acest card.
             </div>
           )}
         </div>
-
-        {/* Recent matches */}
-        {recentMatches.length > 0 && (
-          <div className={`${glassCard} p-6 md:p-8`}>
-            <h2 className="text-xl font-bold mb-4">Meciuri recente</h2>
-            <div className="space-y-3">
-              {recentMatches.slice(0, 5).map((m: any) => (
-                <div key={m.id} className="flex items-center justify-between py-3 border-b border-white/10 last:border-0">
-                  <div className="flex items-center gap-3">
-                    <span className="text-slate-400 text-sm capitalize">{m.gameType}</span>
-                    <span className="badge bg-white/10 text-slate-200">Nivel {m.level}</span>
-                    <span className={`badge ${m.status === 'finished' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-400/20 text-amber-200'}`}>
-                      {m.status}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-slate-400 text-sm">{m.players?.length} jucători</span>
-                    <Link href={`/games/${m.gameType}/result?matchId=${m.id}`} className="text-xs py-1 px-3 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20">
-                      Rezultate
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
         )}
+
+        {/* Meciuri recente per joc */}
+        {showGameDetails && (() => {
+          const gameMatches = recentMatches.filter((m: any) => {
+            const gt = m.gameType === 'maze' ? 'labirinturi' : m.gameType;
+            return gt === selectedDashboardGame;
+          });
+          if (gameMatches.length === 0) return null;
+          return (
+            <div className={`${glassCard} p-5 md:p-6`}>
+              <h2 className="text-lg font-bold mb-4">Meciuri recente · {selectedDashboardGameDef?.emoji} {selectedDashboardGameDef?.label}</h2>
+              <div className="space-y-2">
+                {gameMatches.slice(0, 5).map((m: any) => {
+                  const me = m.players?.find((p: any) => p.userId === user?.id);
+                  const myPos = me?.position;
+                  const total = m.players?.length ?? 0;
+                  const isWin = myPos === 1;
+                  const isLoss = myPos === total && total > 1;
+                  return (
+                    <div key={m.id} className="flex items-center justify-between py-2.5 border-b border-white/10 last:border-0 gap-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-slate-400">Nivel {m.level}</span>
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                          isWin ? 'bg-emerald-500/20 text-emerald-300' :
+                          isLoss ? 'bg-red-500/20 text-red-300' :
+                          'bg-slate-700 text-slate-300'
+                        }`}>
+                          {isWin ? 'Victorie' : isLoss ? 'Înfrângere' : myPos ? `Locul ${myPos}` : m.status}
+                        </span>
+                        {me?.eloChange !== undefined && me.eloChange !== 0 && (
+                          <span className={`text-[11px] font-semibold ${ me.eloChange > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {me.eloChange > 0 ? '+' : ''}{me.eloChange} ELO
+                          </span>
+                        )}
+                        {me?.xpGained > 0 && (
+                          <span className="text-[11px] font-semibold text-yellow-400">+{me.xpGained} XP</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-slate-500">{m.players?.length} jucători</span>
+                        <Link href={`/games/${m.gameType}/result?matchId=${m.id}`} className="text-[11px] py-1 px-2.5 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition-colors">
+                          Rezultate
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         </div>
       </main>
 
       {showNormalConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+          <div className="w-full max-w-[40rem] rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-white">Alege cum vrei să joci</h3>
             <p className="mt-2 text-sm text-slate-300">Poți intra random sau poți genera un link pentru prieteni (expiră în 5 minute).</p>
             <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -873,7 +1021,7 @@ export default function DashboardPage() {
 
       {showAiConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-slate-900 p-5 shadow-2xl">
+          <div className="w-full max-w-[40rem] rounded-2xl border border-amber-500/30 bg-slate-900 p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-white">Cum vrei să joci puzzle-ul generat?</h3>
             <p className="mt-2 text-sm text-amber-100/85">
               Tema selectată: <span className="font-semibold text-amber-200">{AI_THEME_LABELS[aiTheme]}</span>
@@ -915,7 +1063,7 @@ export default function DashboardPage() {
 
       {showRandomAccept && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+          <div className="w-full max-w-[40rem] rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-white">Ai găsit un meci random</h3>
             <p className="mt-2 text-sm text-slate-300">Vrei să intri în acest joc?</p>
             <p className="mt-2 text-xs font-semibold text-amber-200">Timp rămas: {randomAcceptSecondsLeft ?? RANDOM_ACCEPT_TTL_SECONDS}s</p>
