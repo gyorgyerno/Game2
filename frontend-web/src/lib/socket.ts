@@ -7,7 +7,13 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    let token: string | null = null;
+    if (typeof window !== 'undefined') {
+      try { token = localStorage.getItem('token'); } catch { /* Edge strict mode */ }
+      if (!token) {
+        try { token = sessionStorage.getItem('token'); } catch { /* ignore */ }
+      }
+    }
     socket = io(SOCKET_URL, {
       auth: { token },
       reconnection: true,

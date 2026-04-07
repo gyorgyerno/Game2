@@ -7,6 +7,7 @@ import { systemConfigService } from '../services/SystemConfigService';
 import { evaluateChallengesForUser } from '../services/BonusChallengeService';
 import { contestEngine } from '../services/ContestEngine';
 import { countdownTimers, matchTimers, countdownStarted } from './matchState';
+import { scheduleAdminStatsEmit } from './index';
 import { captureGhostRuns } from './ghostRuns';
 import { updatePlayerSkillProfileForMatch } from './skillProfile';
 
@@ -203,6 +204,7 @@ export async function finalizeMatch(
     await captureGhostRuns(final);
 
     io.to(room).emit(SOCKET_EVENTS.MATCH_FINISHED, final);
+    scheduleAdminStatsEmit();
 
     // ── ContestEngine hook (non-blocking, nu afectează meciul) ────────────────
     if (final) {

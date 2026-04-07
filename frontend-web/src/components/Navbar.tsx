@@ -1,16 +1,25 @@
 'use client';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { Trophy, LogOut, Home, UserPlus } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { useEffect, useState } from 'react';
 import { friendsApi } from '@/lib/api';
+import { getSocket, disconnectSocket } from '@/lib/socket';
 
 export default function Navbar() {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, logout } = useAuthStore();
   const leagueLabel = user?.league ? user.league.charAt(0).toUpperCase() + user.league.slice(1) : '';
   const [pendingCount, setPendingCount] = useState(0);
+
+  const navBtn = (active: boolean) =>
+    `inline-flex items-center justify-center rounded-xl border px-3 py-1.5 text-sm transition-colors ${
+      active
+        ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
+        : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:bg-slate-700/60'
+    }`;
 
   useEffect(() => {
     if (!user) return;
@@ -18,6 +27,13 @@ export default function Navbar() {
     fetch();
     const interval = setInterval(fetch, 30000); // polling la 30s
     return () => clearInterval(interval);
+  }, [user]);
+
+  // Menține socketul activ cât timp userul e autentificat
+  useEffect(() => {
+    if (!user) return;
+    getSocket(); // conectează dacă nu e deja conectat
+    return () => { disconnectSocket(); };
   }, [user]);
 
   function handleLogout() {
@@ -36,9 +52,9 @@ export default function Navbar() {
             🎯 Integrame
           </Link>
           <div className="flex items-center gap-2">
-            <Link href="/dashboard" className="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-slate-700/60"><Home size={14} /></Link>
-            <Link href="/games/integrame/leaderboard" className="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-slate-700/60"><Trophy size={14} /></Link>
-            <Link href="/friends" className="relative inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-slate-700/60">
+            <Link href="/dashboard" className={navBtn(pathname === '/dashboard')}><Home size={14} /></Link>
+            <Link href="/leaderboard" className={navBtn(pathname === '/leaderboard')}><Trophy size={14} /></Link>
+            <Link href="/friends" className={`relative ${navBtn(pathname === '/friends')}`}>
               <UserPlus size={14} />
               {pendingCount > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">

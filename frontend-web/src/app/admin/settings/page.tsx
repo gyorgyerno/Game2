@@ -149,6 +149,9 @@ interface LevelConfig {
   maxPlayers: number;
   winsToUnlock: number;
   gamesPerLevel: number;
+  aiEnabled: boolean;
+  poolSize: number;
+  poolCount: number;
   matchCount: number;
   updatedBy: string | null;
 }
@@ -1897,6 +1900,9 @@ function LevelManagerCard({
   const [addMaxPlayers, setAddMaxPlayers] = useState(2);
   const [addDifficultyValue, setAddDifficultyValue] = useState(50);
   const [saving, setSaving] = useState(false);
+  const [genCount, setGenCount] = useState(50);
+  const [genShape, setGenShape] = useState('rectangle');
+  const [generatingPool, setGeneratingPool] = useState(false);
   const [editForm, setEditForm] = useState({
     displayName: '',
     difficultyValue: 50,
@@ -1904,6 +1910,8 @@ function LevelManagerCard({
     maxPlayers: 2,
     winsToUnlock: 5,
     gamesPerLevel: 3,
+    aiEnabled: true,
+    poolSize: 10,
   });
 
   function openEdit(lc: LevelConfig) {
@@ -1915,6 +1923,8 @@ function LevelManagerCard({
       maxPlayers: lc.maxPlayers,
       winsToUnlock: lc.winsToUnlock ?? 5,
       gamesPerLevel: lc.gamesPerLevel ?? 3,
+      aiEnabled: lc.aiEnabled ?? true,
+      poolSize: lc.poolSize ?? 10,
     });
   }
 
@@ -1988,8 +1998,8 @@ function LevelManagerCard({
     }
   }
 
-  const diffLabel = (v: number) => v < 30 ? 'Ușor' : v < 60 ? 'Mediu' : v < 80 ? 'Greu' : 'Extrem';
-  const diffColor = (v: number) => `hsl(${120 - v * 1.2}, 70%, 50%)`;
+  const diffLabel = (v: number) => v < 30 ? 'Ușor' : v < 60 ? 'Mediu' : v < 80 ? 'Greu' : v < 130 ? 'Extrem' : v < 170 ? 'Mega' : 'Legendar';
+  const diffColor = (v: number) => `hsl(${Math.max(0, 120 - v * 0.6)}, 70%, 50%)`;
 
   return (
     <div style={{
@@ -2108,17 +2118,17 @@ function LevelManagerCard({
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 6 }}>
                 Dificultate:{' '}
-                <strong style={{ color: diffColor(addDifficultyValue) }}>{addDifficultyValue}%</strong>
+                <strong style={{ color: diffColor(addDifficultyValue) }}>{addDifficultyValue}</strong>
                 <span style={{ marginLeft: 8, color: '#475569' }}>({diffLabel(addDifficultyValue)})</span>
               </label>
               <input
-                type="range" min={0} max={100} step={1}
+                type="range" min={0} max={200} step={1}
                 value={addDifficultyValue}
                 onChange={(e) => setAddDifficultyValue(Number(e.target.value))}
                 style={{ width: '100%', accentColor: game.primaryColor }}
               />
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#475569', marginTop: 2 }}>
-                <span>0 — Ușor</span><span>50 — Mediu</span><span>100 — Extrem</span>
+                <span>0 — Ușor</span><span>100 — Extrem</span><span>200 — Legendar</span>
               </div>
             </div>
             {/* Butoane */}
@@ -2180,13 +2190,17 @@ function LevelManagerCard({
                     {!lc.isActive && (
                       <span style={{ fontSize: 10, color: '#ef4444', background: '#ef444422', padding: '1px 6px', borderRadius: 4, border: '1px solid #ef444433' }}>INACTIV</span>
                     )}
+                    {!(lc.aiEnabled ?? true) && (
+                      <span style={{ fontSize: 10, color: '#f97316', background: '#f9731622', padding: '1px 6px', borderRadius: 4, border: '1px solid #f9731633' }}>AI OFF</span>
+                    )}
                   </div>
                   <div style={{ fontSize: 11, color: '#475569', display: 'flex', gap: 14, marginTop: 2 }}>
-                    <span>🎯 <strong style={{ color: '#94a3b8' }}>{lc.difficultyValue}%</strong> — {diffLabel(lc.difficultyValue)}</span>
+                    <span>🎯 <strong style={{ color: '#94a3b8' }}>{lc.difficultyValue}</strong> — {diffLabel(lc.difficultyValue)}</span>
                     <span>👥 Max <strong style={{ color: '#94a3b8' }}>{lc.maxPlayers}</strong> jucători</span>
                     <span>🏆 <strong style={{ color: '#94a3b8' }}>{lc.winsToUnlock ?? 5}</strong> victorii pentru deblocare</span>
                     <span>🎮 <strong style={{ color: '#94a3b8' }}>{lc.gamesPerLevel ?? 3}</strong> jocuri/nivel Solo</span>
-                    <span>🎮 <strong style={{ color: lc.matchCount > 0 ? '#60a5fa' : '#475569' }}>{lc.matchCount}</strong> meciuri jucate</span>
+                    <span>� Pool: <strong style={{ color: (lc.poolCount ?? 0) >= (lc.poolSize ?? 10) ? '#10b981' : '#f97316' }}>{lc.poolCount ?? 0}</strong> / <strong style={{ color: '#94a3b8' }}>{lc.poolSize ?? 10}</strong></span>
+                    <span>�🎮 <strong style={{ color: lc.matchCount > 0 ? '#60a5fa' : '#475569' }}>{lc.matchCount}</strong> meciuri jucate</span>
                   </div>
                 </div>
                 {!isEditing && (
@@ -2271,17 +2285,17 @@ function LevelManagerCard({
                   <div style={{ marginBottom: 14 }}>
                     <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 6 }}>
                       Dificultate:{' '}
-                      <strong style={{ color: diffColor(editForm.difficultyValue) }}>{editForm.difficultyValue}%</strong>
+                      <strong style={{ color: diffColor(editForm.difficultyValue) }}>{editForm.difficultyValue}</strong>
                       <span style={{ marginLeft: 8, color: '#475569' }}>({diffLabel(editForm.difficultyValue)})</span>
                     </label>
                     <input
-                      type="range" min={0} max={100} step={1}
+                      type="range" min={0} max={200} step={1}
                       value={editForm.difficultyValue}
                       onChange={(e) => setEditForm({ ...editForm, difficultyValue: Number(e.target.value) })}
                       style={{ width: '100%', accentColor: game.primaryColor }}
                     />
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#475569', marginTop: 2 }}>
-                      <span>0 — Ușor</span><span>50 — Mediu</span><span>100 — Extrem</span>
+                      <span>0 — Ușor</span><span>100 — Extrem</span><span>200 — Legendar</span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -2299,6 +2313,93 @@ function LevelManagerCard({
                     <span style={{ fontSize: 11, color: '#475569' }}>
                       {editForm.isActive ? 'Apare în UI, se pot crea meciuri' : 'Ascuns din UI, nu se pot crea meciuri noi'}
                     </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                    <label style={{ fontSize: 12, color: '#94a3b8' }}>🤖 Generare AI:</label>
+                    <button
+                      onClick={() => setEditForm({ ...editForm, aiEnabled: !editForm.aiEnabled })}
+                      style={{
+                        padding: '4px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                        background: editForm.aiEnabled ? '#10b981' : '#f97316',
+                        color: '#fff', fontWeight: 600, fontSize: 12,
+                      }}
+                    >
+                      {editForm.aiEnabled ? '🤖 AI Activ' : '🤖 AI Oprit'}
+                    </button>
+                    <span style={{ fontSize: 11, color: '#475569' }}>
+                      {editForm.aiEnabled ? 'Jocurile generate automat de AI' : 'Jocurile din pool manual'}
+                    </span>
+                  </div>
+                  {/* Pool size + generate section */}
+                  <div style={{ marginBottom: 14, padding: '12px 14px', background: '#0f1320', borderRadius: 8, border: '1px solid #1e2535' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: editForm.aiEnabled ? 0 : 12 }}>
+                      <label style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap' }}>🎰 Target pool:</label>
+                      <input
+                        type="number" min={1} max={10000}
+                        value={editForm.poolSize}
+                        onChange={(e) => setEditForm({ ...editForm, poolSize: Math.max(1, Number(e.target.value)) })}
+                        style={{
+                          width: 80, padding: '5px 8px', borderRadius: 6, boxSizing: 'border-box',
+                          background: '#1a1d27', border: '1px solid #374151',
+                          color: '#e2e8f0', fontSize: 13,
+                        }}
+                      />
+                      <span style={{ fontSize: 11, color: '#475569' }}>
+                        Curent: <strong style={{ color: (levels.find(l => l.level === lc.level)?.poolCount ?? 0) >= editForm.poolSize ? '#10b981' : '#f97316' }}>{levels.find(l => l.level === lc.level)?.poolCount ?? 0}</strong> în pool
+                      </span>
+                    </div>
+                    {!editForm.aiEnabled && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                        <input
+                          type="number" min={1} max={10000}
+                          value={genCount}
+                          onChange={(e) => setGenCount(Math.max(1, Number(e.target.value)))}
+                          style={{
+                            width: 80, padding: '5px 8px', borderRadius: 6,
+                            background: '#1a1d27', border: '1px solid #374151',
+                            color: '#e2e8f0', fontSize: 13,
+                          }}
+                        />
+                        <select
+                          value={genShape}
+                          onChange={(e) => setGenShape(e.target.value)}
+                          style={{
+                            padding: '5px 8px', borderRadius: 6,
+                            background: '#1a1d27', border: '1px solid #374151',
+                            color: '#e2e8f0', fontSize: 13,
+                          }}
+                        >
+                          <option value="rectangle">□ Dreptunghi</option>
+                          <option value="hexagon">⬢ Hexagon</option>
+                          <option value="triangle">△ Triunghi</option>
+                        </select>
+                        <button
+                          disabled={generatingPool}
+                          onClick={async () => {
+                            setGeneratingPool(true);
+                            try {
+                              const r = await adminApi.post(`/api/admin/level-configs/${game.gameType}/${lc.level}/generate-pool`, { count: genCount, shapeVariant: genShape });
+                              const d = r.data as { generated: number; totalPool: number };
+                              showToast(`✅ Generat ${d.generated} jocuri. Total pool: ${d.totalPool}`, 'ok');
+                              await onReload();
+                            } catch (e: unknown) {
+                              const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Eroare generare';
+                              showToast(msg, 'err');
+                            } finally {
+                              setGeneratingPool(false);
+                            }
+                          }}
+                          style={{
+                            padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                            background: generatingPool ? '#374151' : '#7c3aed',
+                            color: '#fff', fontWeight: 600, fontSize: 12,
+                            opacity: generatingPool ? 0.6 : 1,
+                          }}
+                        >
+                          {generatingPool ? '⏳ Generez...' : `⚡ Generează ${genCount}`}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
                     <button

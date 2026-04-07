@@ -142,7 +142,10 @@ router.post('/:slug/join', requireAuth, asyncHandler(async (req: Request, res: R
 
   const contest = await prisma.contest.findUnique({
     where: { slug },
-    include: { _count: { select: { players: true } } },
+    include: {
+      _count: { select: { players: true } },
+      rounds: { select: { gameType: true, minLevel: true } },
+    },
   });
 
   if (!contest) {
@@ -159,6 +162,44 @@ router.post('/:slug/join', requireAuth, asyncHandler(async (req: Request, res: R
   if (contest.maxPlayers != null && contest._count.players >= contest.maxPlayers) {
     res.status(400).json({ error: 'Concursul este plin' });
     return;
+  }
+
+  // Verificare nivel minim — dacă concursul NU e "pentru toată lumea"
+  // Userul trebuie să fi jucat cel puțin un meci la nivelul cerut pentru fiecare gameType din runde
+  if (!(contest as { forEveryone?: boolean }).forEveryone && contest.rounds.length > 0) {
+    // Găsim nivelul minim cerut per gameType (cel mai restrictiv din toate rundele)
+    const minLevelPerType: Record<string, number> = {};
+    for (const r of contest.rounds) {
+      const existing = minLevelPerType[r.gameType];
+      if (existing === undefined || r.minLevel < existing) {
+        minLevelPerType[r.gameType] = r.minLevel;
+      }
+    }
+
+    for (const [gameType, minLevel] of Object.entries(minLevelPerType)) {
+      if (minLevel <= 1) continue; // nivel 1 = oricine poate juca, nu verificăm
+
+      const hasReachedLevel = await prisma.userGameStats.findFirst({
+        where: { userId, gameType, level: { gte: minLevel } },
+        select: { id: true },
+      });
+
+      // Verificăm și progresul solo — fără discriminare între multiplayer și solo 😄
+      const hasReachedLevelSolo = !hasReachedLevel
+        ? await prisma.userSoloGameProgress.findFirst({
+            where: { userId, gameType, level: { gte: minLevel } },
+            select: { id: true },
+          })
+        : null;
+
+      if (!hasReachedLevel && !hasReachedLevelSolo) {
+        const gameLabel = gameType === 'maze' ? 'Labirint' : gameType === 'integrame' ? 'Integrame' : gameType;
+        res.status(403).json({
+          error: `Trebuie să fi jucat cel puțin o partidă la nivelul ${minLevel} (${gameLabel}) pentru a te înscrie la acest concurs.`,
+        });
+        return;
+      }
+    }
   }
 
   // Upsert — dacă deja e înregistrat, nu dă eroare

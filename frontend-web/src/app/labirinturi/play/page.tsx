@@ -46,12 +46,38 @@ function LabirinturiSoloPlayInner() {
     }
     return Math.floor(Math.random() * 2_147_483_647) + 1;
   });
+  const [seedReady, setSeedReady] = useState(seedParam !== null);
   const didInjectSeed = useRef(false);
+
+  // Dacă nu avem seed în URL, verificăm dacă există pool (aiEnabled=false)
+  // și cerem seed din pool; altfel generăm local
   useEffect(() => {
-    if (!didInjectSeed.current && !searchParams.get('seed')) {
-      didInjectSeed.current = true;
-      router.replace(`/labirinturi/play?level=${level}&game=${game}&shape=${shape}&seed=${mazeSeed}`);
-    }
+    if (seedParam !== null) return; // seed deja în URL
+    gamesApi.getMazePoolSeed(level)
+      .then((res) => {
+        const { seed: poolSeed, shapeVariant: poolShape } = res.data;
+        if (poolSeed != null) {
+          const finalShape = (poolShape as typeof shape) ?? shape;
+          const newSeed = poolSeed;
+          setMazeSeed(newSeed);
+          setSeedReady(true);
+          router.replace(`/labirinturi/play?level=${level}&game=${game}&shape=${finalShape}&seed=${newSeed}&pool=1`);
+        } else {
+          // AI activ sau pool gol → seed local
+          setSeedReady(true);
+          if (!didInjectSeed.current) {
+            didInjectSeed.current = true;
+            router.replace(`/labirinturi/play?level=${level}&game=${game}&shape=${shape}&seed=${mazeSeed}`);
+          }
+        }
+      })
+      .catch(() => {
+        setSeedReady(true);
+        if (!didInjectSeed.current) {
+          didInjectSeed.current = true;
+          router.replace(`/labirinturi/play?level=${level}&game=${game}&shape=${shape}&seed=${mazeSeed}`);
+        }
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -93,6 +119,12 @@ function LabirinturiSoloPlayInner() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
+      {!seedReady && (
+        <div className="flex items-center justify-center min-h-screen">
+          <span className="text-slate-400 text-sm animate-pulse">Se pregătește labirintul...</span>
+        </div>
+      )}
+      {seedReady && (<>
       <div className="border-b border-slate-800">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center gap-4">
           <Link href="/labirinturi" className="text-slate-400 hover:text-white transition-colors text-sm">
@@ -170,6 +202,7 @@ function LabirinturiSoloPlayInner() {
           }}
         />
       </div>
+      </>)}
     </div>
   );
 }

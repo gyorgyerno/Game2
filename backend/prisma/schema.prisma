@@ -75,6 +75,8 @@ model Match {
   id          String      @id @default(uuid())
   gameType    String
   level       Int         @default(1)
+  mazeSeed    Int?
+  mazeShape   String?
   status      String      @default("waiting") // waiting|countdown|active|finished|abandoned
   isAI        Boolean     @default(false)
   startedAt   DateTime?
@@ -361,9 +363,11 @@ model GameLevelConfig {
   displayName     String   @default("")
   difficultyValue Int      @default(50)
   isActive        Boolean  @default(true)
+  aiEnabled       Boolean  @default(true)
   maxPlayers      Int      @default(2)
   winsToUnlock    Int      @default(5)  // câte victorii sunt necesare pentru a debloca nivelul următor
   gamesPerLevel   Int      @default(3)  // câte jocuri/puzzle-uri sunt în nivelul solo
+  poolSize        Int      @default(10) // câte jocuri pre-generate să existe în pool când aiEnabled=false
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   updatedBy       String?
@@ -371,6 +375,43 @@ model GameLevelConfig {
   @@unique([gameType, level])
   @@index([gameType, isActive])
   @@map("game_level_configs")
+}
+
+// ─── MazeTemplate ────────────────────────────────────────────────────────────
+// Pool reutilizabil de hărți labirint pentru niveluri.
+model MazeTemplate {
+  id           String   @id @default(cuid())
+  level        Int
+  shapeVariant String
+  seed         Int
+  source       String   @default("manual") // manual|ai
+  isActive     Boolean  @default(true)
+  createdBy    String?
+  createdAt    DateTime @default(now())
+
+  usages MazeTemplateUsage[]
+
+  @@unique([level, shapeVariant, seed])
+  @@index([level, isActive])
+  @@map("maze_templates")
+}
+
+// ─── MazeTemplateUsage ───────────────────────────────────────────────────────
+// Urmărește ce template-uri au fost deja folosite de un user pe nivel,
+// pentru a evita repetiția până la epuizarea pool-ului.
+model MazeTemplateUsage {
+  id             String   @id @default(cuid())
+  userId         String
+  level          Int
+  mazeTemplateId String
+  usedAt         DateTime @default(now())
+
+  mazeTemplate MazeTemplate @relation(fields: [mazeTemplateId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, level, mazeTemplateId])
+  @@index([userId, level])
+  @@index([mazeTemplateId])
+  @@map("maze_template_usages")
 }
 
 // ─── BonusChallenge ───────────────────────────────────────────────────────────
@@ -429,19 +470,20 @@ model BannedIP {
 // Un concurs/turneu care poate conține unul sau mai multe jocuri.
 // status: waiting (pre-înregistrare) → live (activ, scoruri valide) → ended (final) | cancelled (anulat automat la start dacă 0 jucători)
 model Contest {
-  id          String    @id @default(cuid())
-  name        String
-  slug        String    @unique
-  description String    @default("")
-  type        String    @default("public")  // public | private
-  status      String    @default("waiting") // waiting | live | ended
-  startAt     DateTime
-  endAt       DateTime
-  maxPlayers  Int?      // null = nelimitat
-  botsCount   Int       @default(0) // boți SIMULATED auto-înregistrați la start
-  createdBy   String    @default("admin")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  name         String
+  slug         String    @unique
+  description  String    @default("")
+  type         String    @default("public")  // public | private
+  status       String    @default("waiting") // waiting | live | ended
+  startAt      DateTime
+  endAt        DateTime
+  maxPlayers   Int?      // null = nelimitat
+  botsCount    Int       @default(0) // boți SIMULATED auto-înregistrați la start
+  forEveryone  Boolean   @default(false) // ignoră nivelul jucătorului — oricine se califică
+  createdBy    String    @default("admin")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   players     ContestPlayer[]
   rounds      ContestRound[]

@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import prisma from '../prisma';
+import { isUserOnline } from '../socket';
 
 const router = Router();
 
@@ -34,6 +35,56 @@ router.post('/request', requireAuth, async (req: AuthRequest & import('express')
   return res.status(201).json(friendship);
 });
 
+// ─── GET /api/friends/online?gameType=&level=  (prieteni online filtrați pe nivel) ──
+router.get('/online', requireAuth, async (req: AuthRequest & import('express').Request, res: Response) => {
+  const { gameType, level } = (req as import('express').Request).query as { gameType?: string; level?: string };
+  const levelNum = level ? parseInt(level, 10) : null;
+
+  const friendships = await prisma.friendship.findMany({
+    where: {
+      status: 'accepted',
+      OR: [{ senderId: req.userId! }, { receiverId: req.userId! }],
+    },
+    select: { senderId: true, receiverId: true },
+  });
+
+  const friendIds = friendships.map((f) => f.senderId === req.userId ? f.receiverId : f.senderId);
+
+  // Filtrează doar prietenii online
+  const onlineIds = friendIds.filter((id) => isUserOnline(id));
+  if (onlineIds.length === 0) return res.json([]);
+
+  // Dacă gameType + level sunt specificate, verificăm că prietenul a jucat la acel nivel
+  let eligibleIds = onlineIds;
+  if (gameType && levelNum !== null && !isNaN(levelNum)) {
+    const [statsMatches, soloMatches] = await Promise.all([
+      prisma.userGameStats.findMany({
+        where: { userId: { in: onlineIds }, gameType, level: { gte: levelNum } },
+        select: { userId: true },
+      }),
+      prisma.userSoloGameProgress.findMany({
+        where: { userId: { in: onlineIds }, gameType, level: { gte: levelNum } },
+        select: { userId: true },
+      }),
+    ]);
+    const eligibleSet = new Set([
+      ...statsMatches.map((s) => s.userId),
+      ...soloMatches.map((s) => s.userId),
+    ]);
+    // Level 1 — toată lumea poate juca (nivelul de bază)
+    eligibleIds = levelNum <= 1 ? onlineIds : onlineIds.filter((id) => eligibleSet.has(id));
+  }
+
+  if (eligibleIds.length === 0) return res.json([]);
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: eligibleIds } },
+    select: { id: true, username: true, avatarUrl: true },
+  });
+
+  return res.json(users.map((u) => ({ ...u, isOnline: true })));
+});
+
 // ─── GET /api/friends  (lista prietenilor acceptați) ──────────────────────────
 router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
   const friendships = await prisma.friendship.findMany({
@@ -50,9 +101,10 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
   });
 
   // Returnează celălalt user din fiecare prietenie
-  const friends = friendships.map((f: any) =>
-    f.senderId === req.userId ? f.receiver : f.sender
-  );
+  const friends = friendships.map((f: any) => {
+    const friend = f.senderId === req.userId ? f.receiver : f.sender;
+    return { ...friend, isOnline: isUserOnline(friend.id) };
+  });
   return res.json(friends);
 });
 

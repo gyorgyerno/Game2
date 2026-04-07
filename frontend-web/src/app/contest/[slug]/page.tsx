@@ -48,6 +48,7 @@ export default function ContestPage() {
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState('');
   const [joinError, setJoinError] = useState('');
+  const [levelBlockModal, setLevelBlockModal] = useState<{ requiredLevel: number; gameLabel: string } | null>(null);
   const [playingRoundId, setPlayingRoundId] = useState<string | null>(null);
 
   // Fetch contest info
@@ -138,7 +139,14 @@ export default function ContestPage() {
       await fetchContest();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setJoinError(e.response?.data?.error ?? 'Eroare la înregistrare.');
+      const msg = e.response?.data?.error ?? 'Eroare la înregistrare.';
+      // Detectăm eroarea de nivel insuficient și extragem nivelul cerut
+      const levelMatch = msg.match(/nivelul (\d+) \(([^)]+)\)/);
+      if (levelMatch) {
+        setLevelBlockModal({ requiredLevel: Number(levelMatch[1]), gameLabel: levelMatch[2] });
+      } else {
+        setJoinError(msg);
+      }
     } finally {
       setJoining(false);
     }
@@ -172,6 +180,59 @@ export default function ContestPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+
+      {/* ── Modal nivel insuficient ──────────────────────────────────────────── */}
+      {levelBlockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl space-y-5 animate-fade-in">
+            <div className="text-6xl">🔒</div>
+            <h2 className="text-white text-xl font-bold">Nivel insuficient</h2>
+            <p className="text-gray-300 text-sm leading-relaxed">
+              Acest concurs necesită să fi jucat cel puțin la{' '}
+              <span className="text-violet-400 font-bold">Nivelul {levelBlockModal.requiredLevel}</span>{' '}
+              ({levelBlockModal.gameLabel}).
+            </p>
+
+            {/* Bara de progres motivațională */}
+            <div className="bg-gray-800 rounded-xl p-4 text-left space-y-2">
+              <div className="flex justify-between text-xs text-gray-400 mb-1">
+                <span>Nivelul tău actual</span>
+                <span className="text-violet-400 font-bold">Niv. {levelBlockModal.requiredLevel - 1 > 0 ? levelBlockModal.requiredLevel - 1 : 1} → 🎯 {levelBlockModal.requiredLevel}</span>
+              </div>
+              <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-violet-600 to-fuchsia-500 rounded-full transition-all duration-700"
+                  style={{ width: `${Math.round(((levelBlockModal.requiredLevel - 1) / levelBlockModal.requiredLevel) * 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 text-center pt-1">
+                Mai joacă meciuri la {levelBlockModal.gameLabel} pentru a debloca accesul!
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setLevelBlockModal(null);
+                  const gt = contest?.rounds.find(r => r.label.toLowerCase().includes(levelBlockModal.gameLabel.toLowerCase()))?.gameType ?? 'labirinturi';
+                  const canonicalGt = gt === 'maze' ? 'labirinturi' : gt;
+                  router.push(`/games/${canonicalGt}/play?level=${levelBlockModal.requiredLevel - 1 > 0 ? levelBlockModal.requiredLevel - 1 : 1}`);
+                }}
+                className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold px-6 py-3 rounded-xl transition-colors"
+              >
+                🎮 Joacă acum să avansezi!
+              </button>
+              <button
+                onClick={() => setLevelBlockModal(null)}
+                className="w-full text-gray-500 hover:text-gray-300 text-sm py-2 transition-colors"
+              >
+                Poate mai târziu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="border-b border-gray-800 bg-gray-900/50">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -286,7 +347,11 @@ export default function ContestPage() {
               <p className="text-red-400 font-semibold">Concursul este plin.</p>
             ) : (
               <>
-                {joinError && <p className="text-red-400 text-sm">{joinError}</p>}
+                {joinError && (
+                  <p className="text-red-400 text-sm bg-red-900/20 border border-red-800 rounded-lg px-3 py-2">
+                    {joinError}
+                  </p>
+                )}
                 <button
                   onClick={handleJoin}
                   disabled={joining}

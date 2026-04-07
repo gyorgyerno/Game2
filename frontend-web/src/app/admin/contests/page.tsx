@@ -37,6 +37,7 @@ interface ContestRow {
   endAt: string;
   maxPlayers: number | null;
   botsCount: number;
+  forEveryone: boolean;
   createdBy: string;
   createdAt: string;
   registeredCount: number;
@@ -84,6 +85,7 @@ interface CreateForm {
   endAt: string;
   maxPlayers: string;
   botsCount: string;
+  forEveryone: boolean;
   rounds: RoundForm[];
 }
 
@@ -95,6 +97,7 @@ const EMPTY_FORM: CreateForm = {
   startAt: '', endAt: '',
   maxPlayers: '',
   botsCount: '0',
+  forEveryone: false,
   rounds: [{ ...EMPTY_ROUND }],
 };
 
@@ -159,6 +162,7 @@ export default function AdminContestsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [expandedPlayer, setExpandedPlayer] = useState<string | null>(null);
   const [gameOptions, setGameOptions] = useState<string[]>(['integrame', 'labirinturi', 'slogane']);
+  const [levelConfigsByGame, setLevelConfigsByGame] = useState<Record<string, Array<{ level: number; displayName: string; isActive: boolean }>>>({});
 
   const fetchContests = useCallback(async () => {
     try {
@@ -173,7 +177,21 @@ export default function AdminContestsPage() {
     adminApi.get('/api/admin/scoring-configs')
       .then(({ data }) => {
         const types: string[] = (data.configs ?? []).map((c: { gameType: string }) => c.gameType);
-        if (types.length > 0) setGameOptions(types);
+        if (types.length > 0) {
+          setGameOptions(types);
+          // Încarcă nivelurile active pentru fiecare tip de joc
+          Promise.all(
+            types.map(gt =>
+              adminApi.get(`/api/admin/level-configs/${gt}`)
+                .then(({ data: d }) => ({ gt, levels: d.levels ?? [] }))
+                .catch(() => ({ gt, levels: [] }))
+            )
+          ).then(results => {
+            const map: Record<string, Array<{ level: number; displayName: string; isActive: boolean }>> = {};
+            for (const { gt, levels } of results) map[gt] = levels;
+            setLevelConfigsByGame(map);
+          });
+        }
       })
       .catch(() => { /* fallback la valorile default */ });
   }, []);
@@ -223,6 +241,7 @@ export default function AdminContestsPage() {
         endAt: new Date(form.endAt).toISOString(),
         maxPlayers: form.maxPlayers ? Number(form.maxPlayers) : null,
         botsCount: Number(form.botsCount) || 0,
+        forEveryone: form.forEveryone,
         rounds: form.rounds.map((r, i) => ({ order: i + 1, label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
       };
       if (editingId) {
@@ -253,6 +272,7 @@ export default function AdminContestsPage() {
       endAt: toLocalInputValue(new Date(c.endAt)),
       maxPlayers: c.maxPlayers != null ? String(c.maxPlayers) : '',
       botsCount: String(c.botsCount ?? 0),
+      forEveryone: c.forEveryone ?? false,
       rounds: c.rounds.map(r => ({ label: r.label, gameType: r.gameType, minLevel: r.minLevel, matchesCount: r.matchesCount })),
     });
     setEditingId(c.id);
@@ -420,6 +440,29 @@ export default function AdminContestsPage() {
             </Field>
           </div>
 
+          {/* ── Pentru toată lumea ──────────────────────────────────────── */}
+          <button
+            type="button"
+            onClick={() => setForm(f => ({ ...f, forEveryone: !f.forEveryone }))}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition-colors text-left ${
+              form.forEveryone
+                ? 'border-amber-500 bg-amber-500/10 text-amber-300'
+                : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600'
+            }`}
+          >
+            <span className="text-2xl">{form.forEveryone ? '🌍' : '🔒'}</span>
+            <div>
+              <div className="font-semibold text-sm">
+                {form.forEveryone ? 'Pentru toată lumea ✓' : 'Pentru toată lumea'}
+              </div>
+              <div className="text-xs opacity-70">
+                {form.forEveryone
+                  ? 'Orice nivel contează — toți jucătorii se califică indiferent de nivelul lor'
+                  : 'Activează pentru a accepta scoruri de la orice nivel'}
+              </div>
+            </div>
+          </button>
+
           {/* ── Rounds Editor ───────────────────────────────────────────── */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -484,11 +527,13 @@ export default function AdminContestsPage() {
                           return { ...f, rounds };
                         })}
                       >
-                        {[1, 2, 3, 4, 5].map(l => (
-                          <option key={l} value={l}>
-                            Nivel {l} {l === 1 ? '— 9×9 (simplu)' : l === 2 ? '— 11×11' : l === 3 ? '— 13×13 (mediu)' : l === 4 ? '— 15×15' : '— 17×17 (avansat)'}
-                          </option>
-                        ))}
+                        {(() => {
+                          const active = levelConfigsByGame[r.gameType]?.filter(lc => lc.isActive) ?? [];
+                          const opts = active.length > 0 ? active : [1,2,3,4,5].map(l => ({ level: l, displayName: `Nivel ${l}`, isActive: true }));
+                          return opts.map(lc => (
+                            <option key={lc.level} value={lc.level}>{lc.displayName}</option>
+                          ));
+                        })()}
                       </select>
                     </div>
                     <div>
@@ -568,6 +613,7 @@ export default function AdminContestsPage() {
                       <span className={`text-xs px-2 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
                       <span className="text-xs text-gray-600 font-mono">{c.slug}</span>
                       {c.type === 'private' && <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">🔒 Privat</span>}
+                      {c.forEveryone && <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">🌍 Toată lumea</span>}
                     </div>
                     {c.description && <p className="text-gray-400 text-xs mt-1 truncate">{c.description}</p>}
                     <div className="flex flex-wrap gap-1 mt-2">

@@ -3,6 +3,8 @@ import { gameRegistry } from '../games/GameRegistry';
 import prisma from '../prisma';
 import { gameLevelConfigService } from '../services/GameLevelConfigService';
 import { systemConfigService } from '../services/SystemConfigService';
+import { getRandomMazeFromPool } from '../services/MazePoolService';
+import { requireAuth, type AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -90,7 +92,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/games/levels/:gameType — config publică a nivelelor (fără auth)
-// Returnează: [{ level, displayName, winsToUnlock, gamesPerLevel, maxPlayers, difficultyValue }]
+// Returnează: [{ level, displayName, winsToUnlock, gamesPerLevel, maxPlayers, difficultyValue, aiEnabled }]
 router.get('/levels/:gameType', async (req, res) => {
   const { gameType } = req.params as { gameType: string };
   const levels = gameLevelConfigService.getActiveLevels(gameType);
@@ -102,6 +104,7 @@ router.get('/levels/:gameType', async (req, res) => {
       gamesPerLevel: l.gamesPerLevel,
       maxPlayers: l.maxPlayers,
       difficultyValue: l.difficultyValue,
+      aiEnabled: l.aiEnabled,
     }))
   );
 });
@@ -127,6 +130,35 @@ router.get('/ui-config', (_req, res) => {
   return res.json({
     aiAssistantEnabled: ui.aiAssistantEnabled,
   });
+});
+
+// GET /api/games/maze/pool-seed?level=N — seed random din pool pentru solo
+// Returnează { seed, shapeVariant } sau { seed: null } dacă pool-ul e gol
+router.get('/maze/pool-seed', requireAuth, async (req, res) => {
+  const authReq = req as AuthRequest;
+  const userId = authReq.userId;
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const level = parseInt((req.query['level'] as string) || '1', 10);
+  if (!Number.isFinite(level) || level < 1) {
+    res.status(400).json({ error: 'level invalid' });
+    return;
+  }
+
+  const levelCfg = gameLevelConfigService.getLevelConfig('maze', level);
+  if (!levelCfg || levelCfg.aiEnabled) {
+    // AI activ sau nivel inexistent — clientul folosește seed local
+    res.json({ seed: null, aiEnabled: levelCfg?.aiEnabled ?? true });
+    return;
+  }
+
+  const result = await getRandomMazeFromPool(prisma, level, userId);
+  if (!result) {
+    res.json({ seed: null, aiEnabled: false, poolEmpty: true });
+    return;
+  }
+
+  res.json({ seed: result.seed, shapeVariant: result.shapeVariant, aiEnabled: false });
 });
 
 export default router;

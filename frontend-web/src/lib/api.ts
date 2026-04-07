@@ -91,9 +91,23 @@ const matchesApi = {
 export { matchesApi };
 
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
+export type GlobalLeaderboardEntry = {
+  rank: number;
+  userId: number;
+  username: string;
+  avatarUrl: string | null;
+  rating: number;
+  xp: number;
+  wins: number;
+  league: string;
+  isMe: boolean;
+};
+
 export const leaderboardApi = {
   get: (params?: { gameType?: string; level?: number; page?: number }) =>
     api.get('/leaderboard', { params }),
+  getGlobal: () =>
+    api.get<{ top: GlobalLeaderboardEntry[]; me: GlobalLeaderboardEntry | null }>('/leaderboard/global'),
 };
 
 // ─── Invites ─────────────────────────────────────────────────────────────────
@@ -139,6 +153,7 @@ export const aiApi = {
 export const friendsApi = {
   sendRequest:    (username: string) => api.post('/friends/request', { username }),
   list:           ()                 => api.get('/friends'),
+  online:         (gameType?: string, level?: number) => api.get('/friends/online', { params: { gameType, level } }),
   requests:       ()                 => api.get('/friends/requests'),
   sent:           ()                 => api.get('/friends/sent'),
   accept:         (id: string)       => api.post(`/friends/${id}/accept`),
@@ -149,7 +164,8 @@ export const friendsApi = {
 export const gamesApi = {
   getAll:       ()             => api.get('/games'),
   getRules:     (gameType: string) => api.get<{ timeLimit: number; pointsPerCorrect: number; pointsPerMistake: number; bonusCompletion: number; bonusFirstFinisher: number; forfeitBonus: number }>(`/games/rules/${gameType}`),
-  getLevels:    (gameType: string) => api.get<Array<{ level: number; displayName: string; gamesPerLevel: number; maxPlayers: number; winsToUnlock: number; difficultyValue: number }>>(`/games/levels/${gameType}`),
+  getLevels:    (gameType: string) => api.get<Array<{ level: number; displayName: string; gamesPerLevel: number; maxPlayers: number; winsToUnlock: number; difficultyValue: number; aiEnabled?: boolean }>>(`/games/levels/${gameType}`),
+  getMazePoolSeed: (level: number) => api.get<{ seed: number | null; shapeVariant?: string; aiEnabled: boolean; poolEmpty?: boolean }>(`/games/maze/pool-seed?level=${level}`),
   getUiConfig:  () => api.get<{ aiAssistantEnabled: boolean }>('/games/ui-config'),
 };
 

@@ -9,9 +9,9 @@ import AIChatWidget from '@/components/game/AIChatWidget';
 import GameNavbar from '@/components/game/GameNavbar';
 import GameTimer from '@/components/game/GameTimer';
 import EmojiReactions from '@/components/game/EmojiReactions';
-import GameLobbyPanel from '@/components/game/GameLobbyPanel';
+import GameLobbyPanel, { type OnlineFriend } from '@/components/game/GameLobbyPanel';
 import { useAuthStore } from '@/store/auth';
-import { matchesApi, aiApi, gamesApi } from '@/lib/api';
+import { matchesApi, aiApi, gamesApi, friendsApi } from '@/lib/api';
 import { getSocket, SOCKET_EVENTS } from '@/lib/socket';
 import { GAME_RULES, Match, MatchPlayer, MAX_PLAYERS_PER_LEVEL, GameLevel } from '@integrame/shared';
 import { SAMPLE_INTEGRAMA } from '@/lib/puzzles';
@@ -58,6 +58,8 @@ function GamePlayPageInner({ params }: PageProps) {
   const [mazeDifficulty, setMazeDifficulty] = useState<number | undefined>(undefined);
   const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [onlineFriends, setOnlineFriends] = useState<OnlineFriend[]>([]);
+  const [invitedFriendIds, setInvitedFriendIds] = useState<string[]>([]);
   const mountTimeRef = useRef<number>(0);
   const isRefreshingRef = useRef(false);
   const progressThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,6 +93,29 @@ function GamePlayPageInner({ params }: PageProps) {
       .then((r) => setAiAssistantEnabled(r.data.aiAssistantEnabled))
       .catch(() => {});
   }, []);
+
+  // Fetch prieteni online filtrați pe nivel — doar pentru modul 'friends'
+  useEffect(() => {
+    if (!allowInvite || !token || !match) return;
+    const level = match.level as number;
+    friendsApi.online(canonicalGameType, level)
+      .then((r) => setOnlineFriends(r.data))
+      .catch(() => {});
+  }, [allowInvite, token, match?.level, canonicalGameType]);
+
+  // Actualizează lista live când un prieten se conectează/deconectează
+  useEffect(() => {
+    if (!allowInvite || !token) return;
+    const socket = getSocket();
+    const handleFriendStatus = () => {
+      if (!match) return;
+      friendsApi.online(canonicalGameType, match.level as number)
+        .then((r) => setOnlineFriends(r.data))
+        .catch(() => {});
+    };
+    socket.on('friend_status_changed', handleFriendStatus);
+    return () => { socket.off('friend_status_changed', handleFriendStatus); };
+  }, [allowInvite, token, canonicalGameType, match?.level]);
 
   const puzzle: CrosswordPuzzle = aiPuzzle || SAMPLE_INTEGRAMA;
   const rules = { ...staticRules, timeLimit: serverTimeLimit };
@@ -256,8 +281,19 @@ function GamePlayPageInner({ params }: PageProps) {
     };
   }, [matchId, token, user?.id]);
 
+  function handleInviteFriend(friendId: string) {
+    if (!matchId || !match) return;
+    setInvitedFriendIds((prev) => [...prev, friendId]);
+    const socket = getSocket();
+    socket.emit('friend_invite', {
+      targetUserId: friendId,
+      matchId,
+      gameType: canonicalGameType,
+      level: match.level,
+    });
+  }
+
   function handleProgress(correctAnswers: number, mistakes: number, metrics?: Record<string, unknown>) {
-    setCorrectWords(correctAnswers);
     setWrongWords(mistakes);
     if (metrics) setLatestMetrics(metrics);
     if (!matchId) return;
@@ -381,6 +417,9 @@ function GamePlayPageInner({ params }: PageProps) {
               allowInvite={allowInvite}
               linkCopied={linkCopied}
               gameType={gameType}
+              onlineFriends={onlineFriends}
+              invitedFriendIds={invitedFriendIds}
+              onInviteFriend={handleInviteFriend}
               onCopyLink={() => {
                 const url = window.location.href;
                 navigator.clipboard.writeText(url).then(() => {

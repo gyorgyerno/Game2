@@ -16,11 +16,15 @@ export interface LevelConfig {
   /** Dificultate 0–100. 0 = ușor, 100 = foarte greu. */
   difficultyValue: number;
   isActive: boolean;
+  /** Controlează dacă AI este permis pentru nivel (opțional, per-level). */
+  aiEnabled: boolean;
   maxPlayers: number;
   /** Numărul de victorii necesare pentru a debloca nivelul următor. */
   winsToUnlock: number;
   /** Numărul de jocuri/puzzle-uri disponibile pentru nivelul solo. */
   gamesPerLevel: number;
+  /** Câte jocuri pre-generate să existe în pool când aiEnabled=false. */
+  poolSize: number;
   updatedBy: string | null;
 }
 
@@ -31,20 +35,22 @@ type LevelConfigRow = {
   displayName: string;
   difficultyValue: number;
   isActive: boolean;
+  aiEnabled: boolean | null;
   maxPlayers: number;
   winsToUnlock: number | null;
   gamesPerLevel: number | null;
+  poolSize: number | null;
   updatedBy: string | null;
 };
 
 // ─── Default-uri per nivel (1–5) ─────────────────────────────────────────────
 
 const DEFAULT_LEVELS: Omit<LevelConfig, 'id' | 'gameType' | 'updatedBy'>[] = [
-  { level: 1, displayName: 'Nivel 1',  difficultyValue: 10,  isActive: true, maxPlayers: 2,  winsToUnlock: 5, gamesPerLevel: 3 },
-  { level: 2, displayName: 'Nivel 2',  difficultyValue: 30,  isActive: true, maxPlayers: 4,  winsToUnlock: 5, gamesPerLevel: 3 },
-  { level: 3, displayName: 'Nivel 3',  difficultyValue: 50,  isActive: true, maxPlayers: 8,  winsToUnlock: 5, gamesPerLevel: 3 },
-  { level: 4, displayName: 'Nivel 4',  difficultyValue: 70,  isActive: true, maxPlayers: 12, winsToUnlock: 5, gamesPerLevel: 3 },
-  { level: 5, displayName: 'Nivel 5',  difficultyValue: 90,  isActive: true, maxPlayers: 20, winsToUnlock: 5, gamesPerLevel: 3 },
+  { level: 1, displayName: 'Nivel 1',  difficultyValue: 10,  isActive: true, aiEnabled: true, maxPlayers: 2,  winsToUnlock: 5, gamesPerLevel: 3, poolSize: 10 },
+  { level: 2, displayName: 'Nivel 2',  difficultyValue: 30,  isActive: true, aiEnabled: true, maxPlayers: 4,  winsToUnlock: 5, gamesPerLevel: 3, poolSize: 10 },
+  { level: 3, displayName: 'Nivel 3',  difficultyValue: 50,  isActive: true, aiEnabled: true, maxPlayers: 8,  winsToUnlock: 5, gamesPerLevel: 3, poolSize: 10 },
+  { level: 4, displayName: 'Nivel 4',  difficultyValue: 70,  isActive: true, aiEnabled: true, maxPlayers: 12, winsToUnlock: 5, gamesPerLevel: 3, poolSize: 10 },
+  { level: 5, displayName: 'Nivel 5',  difficultyValue: 90,  isActive: true, aiEnabled: true, maxPlayers: 20, winsToUnlock: 5, gamesPerLevel: 3, poolSize: 10 },
 ];
 
 const SEEDED_GAME_TYPES = ['integrame', 'maze', 'slogane'];
@@ -64,9 +70,11 @@ class GameLevelConfigService {
       displayName: row.displayName,
       difficultyValue: row.difficultyValue,
       isActive: row.isActive,
+      aiEnabled: row.aiEnabled ?? true,
       maxPlayers: row.maxPlayers,
       winsToUnlock: row.winsToUnlock ?? 5,
       gamesPerLevel: row.gamesPerLevel ?? 3,
+      poolSize: row.poolSize ?? 10,
       updatedBy: row.updatedBy,
     };
   }
@@ -176,9 +184,11 @@ class GameLevelConfigService {
           displayName: data.displayName ?? defaults.displayName,
           difficultyValue: data.difficultyValue ?? defaults.difficultyValue,
           isActive: data.isActive ?? defaults.isActive,
+          aiEnabled: data.aiEnabled ?? defaults.aiEnabled,
           maxPlayers: data.maxPlayers ?? defaults.maxPlayers,
           winsToUnlock: data.winsToUnlock ?? defaults.winsToUnlock ?? 5,
           gamesPerLevel: data.gamesPerLevel ?? defaults.gamesPerLevel ?? 3,
+          poolSize: data.poolSize ?? defaults.poolSize ?? 10,
           updatedBy: updatedBy ?? null,
         },
       } as any) as unknown as LevelConfigRow;

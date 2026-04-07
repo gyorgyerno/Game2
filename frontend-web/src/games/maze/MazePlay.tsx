@@ -205,9 +205,12 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
   // Dacă difficultyValue e furnizat din admin, derivăm parametrii din el (0=ușor, 100=greu)
   // Altfel fallback la formula bazată pe nivel (backward-compatible)
   const diff = difficultyValue ?? Math.min(100, (level - 1) * 25);
-  const rawSize = 9 + Math.round((diff / 100) * 8);
+  // 0–100: mazeSize 9→17 (odd), 101–200: mazeSize 17→25 (odd)
+  const rawSize = diff <= 100
+    ? 9 + Math.round((diff / 100) * 8)
+    : 17 + Math.round(((diff - 100) / 100) * 8);
   const mazeSize = rawSize % 2 === 0 ? rawSize + 1 : rawSize; // forțăm număr impar
-  const bonusCount = diff <= 25 ? 2 : diff <= 75 ? 3 : 4;
+  const bonusCount = diff <= 25 ? 2 : diff <= 75 ? 3 : diff <= 150 ? 4 : 5;
   const shouldPenalizeWalls = diff >= 75;
   const cellSize = 32;
 
@@ -773,14 +776,13 @@ export default function MazePlay({ started, finished, level = 1, onProgress, onF
             pointerEvents: 'none',
           }}
         />
-
-        <div className="mt-3 text-center text-xs tracking-wide" style={{color:'rgba(34,211,238,0.5)',letterSpacing:'0.03em'}}>
-          {started && !finished
-            ? 'Controlează bila cu săgeți, swipe sau drag între celule vecine.'
-            : 'Așteaptă startul meciului pentru a începe.'}
-        </div>
       </div>
 
+      <div className="text-center text-xs tracking-wide mb-2" style={{color:'rgba(34,211,238,0.5)',letterSpacing:'0.03em'}}>
+        {started && !finished
+          ? 'Controlează bila cu săgeți, swipe sau drag între celule vecine.'
+          : 'Așteaptă startul meciului pentru a începe.'}
+      </div>
       <div className="grid grid-cols-3 gap-2 w-[220px] p-3 rounded-[28px]"
         style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.09)',boxShadow:'0 8px 32px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.08)',backdropFilter:'blur(12px)'}}>
         <div />

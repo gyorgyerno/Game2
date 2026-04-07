@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { io as socketIO } from 'socket.io-client';
 import adminApi from '@/lib/adminApi';
 
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+
 interface DashboardData {
-  live: { activeMatches: number; waitingMatches: number };
+  live: { onlineUsers: number; activeMatches: number; waitingMatches: number };
   today: { newUsers: number; finishedMatches: number; abandonRate: number };
   yesterday: { newUsers: number; finishedMatches: number };
   alerts: { stuckCount: number; highAbandon: boolean };
@@ -40,6 +43,24 @@ export default function AdminDashboard() {
       if (tickRef.current) clearInterval(tickRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Admin WebSocket — live stats push ────────────────────────────────────
+  useEffect(() => {
+    const adminToken = typeof window !== 'undefined' ? localStorage.getItem('adminToken') : null;
+    if (!adminToken) return;
+    const adminSocket = socketIO(`${SOCKET_URL}/admin-ws`, {
+      auth: { token: adminToken },
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+    });
+    adminSocket.on('admin_stats_update', (update: { onlineUsers: number; activeMatches: number; waitingMatches: number }) => {
+      setData(prev => prev ? { ...prev, live: update } : prev);
+      setAge(0);
+    });
+    return () => { adminSocket.disconnect(); };
   }, []);
 
   const usersD = data ? delta(data.today.newUsers, data.yesterday.newUsers) : null;
@@ -100,8 +121,9 @@ export default function AdminDashboard() {
           {/* Live KPIs */}
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 24 }}>
             {[
+              { label: 'Online acum', value: data.live.onlineUsers, icon: '🟢', color: '#10b981', d: null, ieri: undefined },
               { label: 'Meciuri active', value: data.live.activeMatches, icon: '🔥', color: '#f59e0b', d: null, ieri: undefined },
-              { label: 'În așteptare', value: data.live.waitingMatches, icon: '⏳', color: '#06b6d4', d: null, ieri: undefined },
+              { label: 'În lobby', value: data.live.waitingMatches, icon: '⏳', color: '#06b6d4', d: null, ieri: undefined },
               { label: 'Useri noi azi', value: data.today.newUsers, icon: '✨', color: '#7c3aed', d: usersD, ieri: data.yesterday.newUsers },
               { label: 'Meciuri azi', value: data.today.finishedMatches, icon: '🎮', color: '#10b981', d: matchesD, ieri: data.yesterday.finishedMatches },
               { label: 'Abandon azi', value: `${data.today.abandonRate}%`, icon: '🚪', color: data.today.abandonRate >= 30 ? '#ef4444' : '#64748b', d: null, ieri: undefined },

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
+import GlobalInviteToast from '@/components/game/GlobalInviteToast';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -14,6 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ro" style={{ backgroundColor: '#020617' }}>
       <body className={`${inter.className} bg-slate-950 text-white min-h-screen`}>
         {children}
+        <GlobalInviteToast />
       </body>
     </html>
   );

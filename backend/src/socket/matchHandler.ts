@@ -3,7 +3,10 @@ import prisma from '../prisma';
 import logger from '../logger';
 import { SOCKET_EVENTS } from '@integrame/shared';
 import { gameRegistry } from '../games/GameRegistry';
+import { gameLevelConfigService } from '../services/GameLevelConfigService';
+import { getRandomMazeFromPool } from '../services/MazePoolService';
 import { startBotGameplaySimulation } from '../services/simulatedPlayers/BotGameplaySimulator';
+import { scheduleAdminStatsEmit } from './index';
 import {
   countdownTimers,
   matchTimers,
@@ -58,7 +61,11 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           logger.info(`[JOIN_MATCH] Reconectare în grace period — abandon anulat user=${userId} matchId=${matchId}`);
         }
         logger.info(`[JOIN_MATCH] ACTIV → trimit MATCH_START direct user=${userId}`);
-        const seed = isMazeGame(match.gameType) ? mazeSeedFromMatchId(match.id) : undefined;
+        // Folosim seed stocat în DB dacă există (set la pornirea meciului), altfel fallback hash
+        const storedSeed = (match as { mazeSeed?: number | null }).mazeSeed;
+        const seed = isMazeGame(match.gameType)
+          ? (storedSeed != null ? storedSeed : mazeSeedFromMatchId(match.id))
+          : undefined;
         socket.emit(SOCKET_EVENTS.MATCH_START, { startedAt: match.startedAt, mazeSeed: seed, timeLimit: gameRegistry.getEffectiveRules(match.gameType, match.level)?.timeLimit ?? 0 });
         return;
       }
@@ -100,8 +107,50 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
         if (countdown < 0) {
           clearInterval(countdownTimers[matchId]);
           delete countdownTimers[matchId];
-          await prisma.match.update({ where: { id: matchId }, data: { status: 'active', startedAt: new Date() } });
-          const mazeSeed = isMazeGame(match.gameType) ? mazeSeedFromMatchId(matchId) : undefined;
+
+          // Determină seed-ul labirint pentru acest meci
+          let mazeSeed: number | undefined = undefined;
+          if (isMazeGame(match.gameType)) {
+            // Concurs: dacă vreun jucător din meci e înscris la un concurs activ cu rundă maze
+            // la același nivel → toți primesc același labirint (seed fix din roundId)
+            const playerIds = match.players.map((p: { userId: string }) => p.userId);
+            const contestRound = await prisma.contestRound.findFirst({
+              where: {
+                gameType: match.gameType,
+                minLevel: match.level,
+                contest: {
+                  status: { in: ['waiting', 'live'] },
+                  players: { some: { userId: { in: playerIds } } },
+                },
+              },
+              select: { id: true },
+            });
+
+            if (contestRound) {
+              mazeSeed = mazeSeedFromMatchId(contestRound.id);
+              logger.info(`[COUNTDOWN] Contest seed fix: roundId=${contestRound.id} seed=${mazeSeed} matchId=${matchId}`);
+            } else {
+              const levelCfg = gameLevelConfigService.getLevelConfig(match.gameType, match.level);
+              if (levelCfg && !levelCfg.aiEnabled) {
+                // Pool mode: pick random seed din maze_templates
+                const poolResult = await getRandomMazeFromPool(prisma, match.level, `match:${matchId}`);
+                if (poolResult) {
+                  mazeSeed = poolResult.seed;
+                  logger.info(`[COUNTDOWN] Pool seed selectat: ${mazeSeed} shapeVariant=${poolResult.shapeVariant} matchId=${matchId}`);
+                } else {
+                  // Fallback: hash determinist dacă pool-ul e gol
+                  mazeSeed = mazeSeedFromMatchId(matchId);
+                  logger.warn(`[COUNTDOWN] Pool gol pentru level=${match.level} — folosesc fallback hash seed=${mazeSeed}`);
+                }
+              } else {
+                mazeSeed = mazeSeedFromMatchId(matchId);
+              }
+            }
+            // Stochează seed-ul în DB pentru reconectări
+            await prisma.match.update({ where: { id: matchId }, data: { status: 'active', startedAt: new Date(), mazeSeed: mazeSeed ?? null } as Record<string, unknown> });
+          } else {
+            await prisma.match.update({ where: { id: matchId }, data: { status: 'active', startedAt: new Date() } });
+          }
           const rules = gameRegistry.getEffectiveRules(match.gameType, match.level);
           if (!rules) {
             logger.error('[COUNTDOWN] game rules missing for match', { matchId, gameType: match.gameType });
@@ -110,6 +159,7 @@ export function registerMatchHandlers(io: SocketServer, socket: Socket, userId: 
           }
           io.to(room).emit(SOCKET_EVENTS.MATCH_START, { startedAt: new Date(), mazeSeed, timeLimit: rules.timeLimit });
           logger.info(`[COUNTDOWN] MATCH_START emis room=${room}${mazeSeed !== undefined ? ` mazeSeed=${mazeSeed}` : ''}`);
+          scheduleAdminStatsEmit();
           // Dacă timeLimit === 0, meciul nu are timer — nu se auto-finalizează
           if (rules.timeLimit > 0) {
             matchTimers[matchId] = setTimeout(() => autoFinishMatch(io, matchId, room), rules.timeLimit * 1000);

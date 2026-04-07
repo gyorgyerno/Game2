@@ -209,7 +209,24 @@ export const SOCKET_EVENTS = {
   LEADERBOARD_UPDATE: 'leaderboard_update',
   REACTION_RECEIVED: 'reaction_received',
   ERROR: 'error',
+
+  // Admin namespace → Admin client
+  ADMIN_STATS_UPDATE: 'admin_stats_update',
+
+  // Server → Client (friends)
+  FRIEND_STATUS_CHANGED: 'friend_status_changed',
 } as const;
+
+export interface FriendStatusChanged {
+  userId: string;
+  isOnline: boolean;
+}
+
+export interface AdminStatsUpdate {
+  onlineUsers: number;
+  activeMatches: number;
+  waitingMatches: number;
+}
 
 export interface SocketJoinMatch {
   matchId: string;

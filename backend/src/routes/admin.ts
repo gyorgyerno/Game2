@@ -6,6 +6,7 @@ import path from 'path';
 import prisma from '../prisma';
 import logger from '../logger';
 import { config } from '../config';
+import { getOnlineUserCount } from '../socket';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { asyncHandler } from '../middleware/errorHandler';
 import { gameRegistry } from '../games/GameRegistry';
@@ -411,7 +412,7 @@ router.get('/dashboard', adminAuth, asyncHandler(async (_req: AdminRequest, res:
   `;
 
   const payload = {
-    live: { activeMatches, waitingMatches },
+    live: { onlineUsers: getOnlineUserCount(), activeMatches, waitingMatches },
     today: { newUsers: todayUsers, finishedMatches: todayFinished, abandonRate },
     yesterday: { newUsers: yesterdayUsers, finishedMatches: yesterdayFinished },
     alerts: { stuckCount, highAbandon: abandonRate >= 30 },
@@ -2213,7 +2214,28 @@ router.get('/level-configs/:gameType', adminAuth, asyncHandler(async (req: Admin
     matchCount: matchCountMap[l.level] ?? 0,
   }));
 
-  res.json({ gameType, levels: levelsWithCount });
+  // Număr jocuri în pool per nivel (MazeTemplate activ)
+  const normalizedGT = gameType === 'labirinturi' ? 'maze' : gameType;
+  let poolCountMap: Record<number, number> = {};
+  if (normalizedGT === 'maze') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = prisma as any;
+    const poolRows = await db.mazeTemplate.groupBy({
+      by: ['level'],
+      where: { isActive: true },
+      _count: { id: true },
+    });
+    for (const row of poolRows) {
+      poolCountMap[row.level] = row._count.id;
+    }
+  }
+
+  const levelsWithMeta = levelsWithCount.map((l) => ({
+    ...l,
+    poolCount: poolCountMap[l.level] ?? 0,
+  }));
+
+  res.json({ gameType, levels: levelsWithMeta });
 }));
 
 // PATCH /api/admin/level-configs/:gameType/:level — editează sau creează un nivel
@@ -2225,17 +2247,19 @@ router.patch('/level-configs/:gameType/:level', adminAuth, asyncHandler(async (r
     return;
   }
 
-  const { displayName, difficultyValue, isActive, maxPlayers, winsToUnlock, gamesPerLevel } = req.body as {
+  const { displayName, difficultyValue, isActive, maxPlayers, winsToUnlock, gamesPerLevel, aiEnabled, poolSize } = req.body as {
     displayName?: string;
     difficultyValue?: number;
     isActive?: boolean;
     maxPlayers?: number;
     winsToUnlock?: number;
     gamesPerLevel?: number;
+    aiEnabled?: boolean;
+    poolSize?: number;
   };
 
-  if (difficultyValue !== undefined && (difficultyValue < 0 || difficultyValue > 100)) {
-    res.status(400).json({ error: 'difficultyValue trebuie să fie între 0 și 100' });
+  if (difficultyValue !== undefined && (difficultyValue < 0 || difficultyValue > 200)) {
+    res.status(400).json({ error: 'difficultyValue trebuie să fie între 0 și 200' });
     return;
   }
   if (maxPlayers !== undefined && (maxPlayers < 1 || maxPlayers > 500)) {
@@ -2258,6 +2282,14 @@ router.patch('/level-configs/:gameType/:level', adminAuth, asyncHandler(async (r
   if (maxPlayers    !== undefined) data['maxPlayers']    = Math.round(maxPlayers);
   if (winsToUnlock  !== undefined) data['winsToUnlock']  = Math.round(winsToUnlock);
   if (gamesPerLevel !== undefined) data['gamesPerLevel'] = Math.round(gamesPerLevel);
+  if (aiEnabled !== undefined) data['aiEnabled'] = Boolean(aiEnabled);
+  if (poolSize !== undefined) {
+    if (!Number.isFinite(poolSize) || poolSize < 1 || poolSize > 10000) {
+      res.status(400).json({ error: 'poolSize trebuie să fie între 1 și 10000' });
+      return;
+    }
+    data['poolSize'] = Math.round(poolSize);
+  }
 
   const updated = await gameLevelConfigService.upsertLevel(
     prisma, gameType, level,
@@ -2286,6 +2318,47 @@ router.delete('/level-configs/:gameType/:level', adminAuth, asyncHandler(async (
 
   logger.info(`[ADMIN] LevelConfig deleted gameType=${gameType} level=${level}`, { admin: req.adminUsername });
   res.json({ ok: true });
+}));
+
+// POST /api/admin/level-configs/:gameType/:level/generate-pool
+// Generează N seed-uri aleatorii în maze_templates pentru nivelul dat
+router.post('/level-configs/:gameType/:level/generate-pool', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { gameType, level: levelStr } = req.params as { gameType: string; level: string };
+  const level = parseInt(levelStr, 10);
+  if (!Number.isFinite(level) || level < 1) {
+    res.status(400).json({ error: 'Nivel invalid' });
+    return;
+  }
+
+  const normalizedGT = gameType === 'labirinturi' ? 'maze' : gameType;
+  if (normalizedGT !== 'maze') {
+    res.status(400).json({ error: 'Generarea pool-ului este disponibilă doar pentru jocul Labirint' });
+    return;
+  }
+
+  const body = req.body as { count?: unknown; shapeVariant?: unknown };
+  const count = Math.min(10000, Math.max(1, Math.round(Number(body.count) || 10)));
+  const shapeVariant = String(body.shapeVariant || 'rectangle');
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = prisma as any;
+  let generated = 0;
+  let skipped = 0;
+  for (let i = 0; i < count; i++) {
+    const seed = Math.floor(Math.random() * 2147483647);
+    try {
+      await db.mazeTemplate.create({
+        data: { level, shapeVariant, seed, source: 'admin', isActive: true, createdBy: req.adminUsername ?? null },
+      });
+      generated++;
+    } catch {
+      skipped++; // unique constraint — seed duplicat
+    }
+  }
+
+  const totalPool = await db.mazeTemplate.count({ where: { level, isActive: true } });
+  logger.info(`[ADMIN] generate-pool level=${level} generated=${generated} skipped=${skipped}`, { admin: req.adminUsername });
+  res.json({ ok: true, generated, skipped, totalPool });
 }));
 
 // ─── Bonus Challenges ─────────────────────────────────────────────────────────
@@ -2459,7 +2532,7 @@ router.get('/contests', adminAuth, asyncHandler(async (_req: Request, res: Respo
 router.post('/contests', adminAuth, asyncHandler(async (req: Request, res: Response) => {
   const reqA = req as AdminRequest;
   interface RoundInput { order: number; label: string; gameType: string; minLevel: number; matchesCount: number; }
-  const { name, slug, description, type, startAt, endAt, maxPlayers, botsCount, rounds } = req.body as {
+  const { name, slug, description, type, startAt, endAt, maxPlayers, botsCount, forEveryone, rounds } = req.body as {
     name: string;
     slug: string;
     description?: string;
@@ -2468,6 +2541,7 @@ router.post('/contests', adminAuth, asyncHandler(async (req: Request, res: Respo
     endAt: string;
     maxPlayers?: number | null;
     botsCount?: number;
+    forEveryone?: boolean;
     rounds: RoundInput[];
   };
 
@@ -2499,6 +2573,7 @@ router.post('/contests', adminAuth, asyncHandler(async (req: Request, res: Respo
       endAt: new Date(endAt),
       maxPlayers: maxPlayers ?? null,
       botsCount: botsCount ?? 0,
+      forEveryone: forEveryone ?? false,
       createdBy: reqA.adminUsername ?? 'admin',
       rounds: {
         create: rounds.map((r: RoundInput) => ({
@@ -2530,7 +2605,7 @@ router.patch('/contests/:id', adminAuth, asyncHandler(async (req: Request, res: 
   const reqA = req as AdminRequest;
   const { id } = req.params;
   interface RoundInput { order: number; label: string; gameType: string; minLevel: number; matchesCount: number; }
-  const { name, description, type, startAt, endAt, maxPlayers, botsCount, rounds } = req.body as {
+  const { name, description, type, startAt, endAt, maxPlayers, botsCount, forEveryone, rounds } = req.body as {
     name?: string;
     description?: string;
     type?: string;
@@ -2538,6 +2613,7 @@ router.patch('/contests/:id', adminAuth, asyncHandler(async (req: Request, res: 
     endAt?: string;
     maxPlayers?: number | null;
     botsCount?: number;
+    forEveryone?: boolean;
     rounds?: RoundInput[];
   };
 
@@ -2558,6 +2634,7 @@ router.patch('/contests/:id', adminAuth, asyncHandler(async (req: Request, res: 
       ...(endAt && { endAt: new Date(endAt) }),
       ...(maxPlayers !== undefined && { maxPlayers: maxPlayers ?? null }),
       ...(botsCount !== undefined && { botsCount }),
+      ...(forEveryone !== undefined && { forEveryone }),
     },
     include: {
       rounds: { orderBy: { order: 'asc' } },

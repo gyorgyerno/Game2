@@ -197,13 +197,18 @@ class ContestEngine {
             orderBy: { order: 'asc' },
           },
         },
+        // forEveryone vine automat din modelul Prisma
       });
 
       if (activeContests.length === 0) return;
 
       for (const contest of activeContests) {
-        // Filtrăm rundele unde nivelul meciului coincide exact cu nivelul rundei
-        const eligibleRounds = contest.rounds.filter(r => level === r.minLevel);
+        // Filtrăm rundele eligibile:
+        // — forEveryone: orice nivel contează (concurs pentru toată lumea)
+        // — altfel: exact nivelul rundei
+        const eligibleRounds = contest.rounds.filter(r =>
+          (contest as { forEveryone?: boolean }).forEveryone ? true : level === r.minLevel
+        );
         if (eligibleRounds.length === 0) continue;
 
         for (const round of eligibleRounds) {

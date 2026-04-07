@@ -571,27 +571,38 @@ export default function DashboardPage() {
                   onClick={() => handleOpenGameDetails(game.id)}
                   className="text-left rounded-2xl border border-white/10 bg-white/[0.06] hover:bg-white/[0.11] backdrop-blur-xl shadow-[0_4px_16px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.10)] transition-all p-4"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xl font-bold text-white">{game.emoji} {game.label}</p>
-                      <p className="text-sm text-slate-300 mt-1">{game.supportsSolo ? 'Grup + Solo' : 'Grup'}</p>
-                    </div>
-                    <span className="rounded-full px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shrink-0 transition-colors">
-                      ▶ Joacă acum
-                    </span>
-                  </div>
-                  {gr ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-900/50 text-sky-300 border border-sky-700/40">ELO {gr.rating}</span>
-                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-yellow-900/50 text-yellow-300 border border-yellow-700/40">XP {gr.xp}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold badge-${gr.league}`}>{gr.league}</span>
-                      {totalMatches > 0 && (
-                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-900/50 text-emerald-300 border border-emerald-700/40">{totalWins}V / {totalMatches - totalWins}Î</span>
+                  <div className="flex items-center gap-4">
+                    {game.id === 'labirinturi' && (
+                      <img
+                        src="/Labirint.png"
+                        alt="Labirinturi"
+                        className="w-20 h-20 rounded-xl object-cover shrink-0 border border-white/10"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xl font-bold text-white">{game.emoji} {game.label}</p>
+                          <p className="text-sm text-slate-300 mt-1">{game.supportsSolo ? 'Grup + Solo' : 'Grup'}</p>
+                        </div>
+                        <span className="rounded-full px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shrink-0 transition-colors">
+                          ▶ Joacă acum
+                        </span>
+                      </div>
+                      {gr ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-900/50 text-sky-300 border border-sky-700/40">ELO {gr.rating}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-yellow-900/50 text-yellow-300 border border-yellow-700/40">XP {gr.xp}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold badge-${gr.league}`}>{gr.league}</span>
+                          {totalMatches > 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-900/50 text-emerald-300 border border-emerald-700/40">{totalWins}V / {totalMatches - totalWins}Î</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="mt-3 text-xs text-emerald-400/80">✨ Începe primul meci!</div>
                       )}
                     </div>
-                  ) : (
-                    <div className="mt-3 text-xs text-emerald-400/80">✨ Începe primul meci!</div>
-                  )}
+                  </div>
                 </button>
                 );
               })}

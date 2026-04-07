@@ -4,6 +4,13 @@ import { isLabyrinthGameType } from '@/games/registry';
 
 type MatchPlayerWithUser = MatchPlayer & { user?: { username: string; avatarUrl?: string } };
 
+export interface OnlineFriend {
+  id: string;
+  username: string;
+  avatarUrl?: string;
+  isOnline: boolean;
+}
+
 interface GameLobbyPanelProps {
   gameDef: FrontendGameDefinition | undefined;
   match: (Omit<Match, 'players'> & { players: MatchPlayerWithUser[] }) | null;
@@ -13,6 +20,9 @@ interface GameLobbyPanelProps {
   linkCopied: boolean;
   onCopyLink: () => void;
   gameType?: string;
+  onlineFriends?: OnlineFriend[];
+  invitedFriendIds?: string[];
+  onInviteFriend?: (friendId: string) => void;
 }
 
 // Mapare culoare → clase Tailwind (necesare pentru purge CSS să includă clasele)
@@ -67,6 +77,9 @@ export default function GameLobbyPanel({
   linkCopied,
   onCopyLink,
   gameType,
+  onlineFriends = [],
+  invitedFriendIds = [],
+  onInviteFriend,
 }: GameLobbyPanelProps) {
   const accent = ACCENT_MAP[gameDef?.accentColor ?? 'violet'];
   const playerCount = match?.players.length ?? 0;
@@ -135,7 +148,7 @@ export default function GameLobbyPanel({
         </div>
       )}
 
-      {/* ── Invite button ── */}
+      {/* ── Invite button (link) ── */}
       {allowInvite && !allReady && (
         <button
           onClick={onCopyLink}
@@ -146,9 +159,61 @@ export default function GameLobbyPanel({
           {linkCopied ? (
             <><span>✓</span> Link copiat!</>
           ) : (
-            <><span>🔗</span> Invită un prieten</>
+            <><span>🔗</span> Copiază link invitație</>
           )}
         </button>
+      )}
+
+      {/* ── Prieteni online ── */}
+      {allowInvite && !allReady && onlineFriends.length > 0 && (
+        <div className={`w-full rounded-2xl border px-4 py-3 ${
+          isMaze ? 'border-slate-700 bg-slate-800/60' : `${accent.border} bg-white/70`
+        }`}>
+          <p className={`text-xs font-semibold mb-2 ${
+            isMaze ? 'text-slate-400' : 'text-gray-400'
+          }`}>👥 Prieteni online</p>
+          <div className="flex flex-col gap-2">
+            {onlineFriends.map((f) => {
+              const alreadyInMatch = match?.players.some((p) => (p as any).userId === f.id || (p as any).user?.id === f.id);
+              const invited = invitedFriendIds.includes(f.id);
+              return (
+                <div key={f.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                      isMaze ? 'bg-slate-600' : 'bg-violet-400'
+                    }`}>
+                      {f.username[0]?.toUpperCase()}
+                    </div>
+                    <span className={`text-sm font-medium ${
+                      isMaze ? 'text-slate-300' : 'text-gray-700'
+                    }`}>{f.username}</span>
+                    <span className="w-2 h-2 rounded-full bg-green-400 inline-block" title="Online" />
+                  </div>
+                  {alreadyInMatch ? (
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      isMaze ? 'bg-slate-700 text-slate-400' : 'bg-gray-100 text-gray-400'
+                    }`}>În meci ✓</span>
+                  ) : invited ? (
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      isMaze ? 'bg-slate-700 text-emerald-400' : 'bg-green-50 text-green-600'
+                    }`}>Invitat ✓</span>
+                  ) : (
+                    <button
+                      onClick={() => onInviteFriend?.(f.id)}
+                      className={`text-xs px-3 py-1 rounded-full font-semibold transition-all border ${
+                        isMaze
+                          ? 'border-emerald-600 text-emerald-400 hover:bg-emerald-900/40'
+                          : `${accent.inviteBtn}`
+                      }`}
+                    >
+                      Invită
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
