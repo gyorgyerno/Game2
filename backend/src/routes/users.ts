@@ -5,6 +5,7 @@ import multer from 'multer';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import prisma from '../prisma';
 import { ratingToLeague } from '@integrame/shared';
+import { getCachedEmail } from '../utils/emailCache';
 
 const UPLOADS_DIR = path.join(__dirname, '../../public/uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -34,7 +35,9 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
     include: { gameStats: true, gameRatings: true },
   });
   if (!user) return res.status(404).json({ error: 'Not found' });
-  return res.json({ ...user, league: ratingToLeague(user.rating) });
+  const { email_encrypted, email_hash, email: _ef, ...publicUser } = user;
+  const email = email_encrypted ? getCachedEmail(user.id, email_encrypted) : undefined;
+  return res.json({ ...publicUser, ...(email ? { email } : {}), league: ratingToLeague(publicUser.rating) });
 });
 
 // GET /api/users/:id

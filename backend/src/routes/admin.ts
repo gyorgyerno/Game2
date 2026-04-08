@@ -6,6 +6,8 @@ import path from 'path';
 import prisma from '../prisma';
 import logger from '../logger';
 import { config } from '../config';
+import { encryptEmail } from '../utils/encryption';
+import { hashEmail, maskEmail, looksLikeEmail } from '../utils/hash';
 import { getOnlineUserCount } from '../socket';
 import { adminAuth, AdminRequest } from '../middleware/adminAuth';
 import { asyncHandler } from '../middleware/errorHandler';
@@ -755,12 +757,15 @@ router.get('/simulated-players/profiles', adminAuth, asyncHandler(async (req: Ad
   const search = ((req.query.search as string) || '').trim();
   const skip = (Math.max(1, page) - 1) * limit;
 
+  const emailHashSearch = search && looksLikeEmail(search) ? hashEmail(search) : null;
   const where = search
     ? {
         user: {
           OR: [
             { username: { contains: search } },
+            { email_display: { contains: search } },
             { email: { contains: search } },
+            ...(emailHashSearch ? [{ email_hash: emailHashSearch }] : []),
           ],
         },
       }
@@ -774,6 +779,7 @@ router.get('/simulated-players/profiles', adminAuth, asyncHandler(async (req: Ad
           select: {
             id: true,
             username: true,
+            email_display: true,
             email: true,
             avatarUrl: true,
             userType: true,
@@ -835,10 +841,15 @@ router.post('/simulated-players/profiles', adminAuth, asyncHandler(async (req: A
   const normalizedSkill = clampNumber(Number.isFinite(skillLevel as number) ? Number(skillLevel) : 5, 1, 10);
   const normalizedPreferredGames = Array.isArray(preferredGames) ? preferredGames.filter((g) => typeof g === 'string').slice(0, 12) : [];
 
+  const simSecureFields = config.emailEncryptionKey
+    ? { email_encrypted: encryptEmail(normalizedEmail), email_hash: hashEmail(normalizedEmail), email_display: maskEmail(normalizedEmail) }
+    : {};
+
   const created = await prisma.user.create({
     data: {
       username: normalizedUsername,
-      email: normalizedEmail,
+      email: hashEmail(normalizedEmail),
+      ...simSecureFields,
       avatarUrl: avatarUrl || null,
       userType: 'SIMULATED',
       rating: 1000,
@@ -958,13 +969,16 @@ router.get('/simulated-players/ghost-runs', adminAuth, asyncHandler(async (req: 
   const gameType = ((req.query.gameType as string) || '').trim();
   const skip = (Math.max(1, page) - 1) * limit;
 
+  const ghostEmailHashSearch = search && looksLikeEmail(search) ? hashEmail(search) : null;
   const where = {
     ...(gameType ? { gameType } : {}),
     ...(search ? {
       player: {
         OR: [
           { username: { contains: search } },
+          { email_display: { contains: search } },
           { email: { contains: search } },
+          ...(ghostEmailHashSearch ? [{ email_hash: ghostEmailHashSearch }] : []),
         ],
       },
     } : {}),
@@ -978,6 +992,7 @@ router.get('/simulated-players/ghost-runs', adminAuth, asyncHandler(async (req: 
           select: {
             id: true,
             username: true,
+            email_display: true,
             email: true,
             userType: true,
             rating: true,
@@ -1317,8 +1332,16 @@ router.get('/users', adminAuth, asyncHandler(async (req: AdminRequest, res: Resp
   const sortDir: 'asc' | 'desc' = (req.query.sortDir as string) === 'asc' ? 'asc' : 'desc';
   const skip = (page - 1) * limit;
 
+  const usersEmailHashSearch = search && looksLikeEmail(search) ? hashEmail(search) : null;
   const baseWhere = search
-    ? { OR: [{ email: { contains: search } }, { username: { contains: search } }] }
+    ? {
+        OR: [
+          { email_display: { contains: search } },
+          { email: { contains: search } },
+          { username: { contains: search } },
+          ...(usersEmailHashSearch ? [{ email_hash: usersEmailHashSearch }] : []),
+        ],
+      }
     : {};
   const where = userType ? { ...baseWhere, userType } : baseWhere;
 
@@ -1348,7 +1371,7 @@ router.get('/users', adminAuth, asyncHandler(async (req: AdminRequest, res: Resp
     skip,
     take: limit,
     select: {
-      id: true, email: true, username: true, avatarUrl: true,
+      id: true, email: true, email_display: true, username: true, avatarUrl: true,
       rating: true, xp: true, league: true, referralCode: true, createdAt: true,
       userType: true, isBanned: true, lastIp: true,
       _count: { select: { matchPlayers: true } },
@@ -1475,7 +1498,7 @@ router.get('/invites', adminAuth, asyncHandler(async (req: AdminRequest, res: Re
       orderBy: { createdAt: 'desc' },
       skip,
       take: limit,
-      include: { creator: { select: { username: true, email: true } } },
+      include: { creator: { select: { username: true, email: true, email_display: true } } },
     }),
     prisma.invite.count(),
   ]);
@@ -1662,13 +1685,16 @@ router.get('/matches', adminAuth, asyncHandler(async (req: AdminRequest, res: Re
   const where: Record<string, unknown> = {};
   if (status) where.status = status;
   if (gameType) where.gameType = gameType;
+  const matchEmailHashSearch = search && looksLikeEmail(search) ? hashEmail(search) : null;
   if (search) {
     where.players = {
       some: {
         user: {
           OR: [
             { username: { contains: search } },
+            { email_display: { contains: search } },
             { email: { contains: search } },
+            ...(matchEmailHashSearch ? [{ email_hash: matchEmailHashSearch }] : []),
           ],
         },
       },
@@ -2738,7 +2764,7 @@ router.get('/contests/:id/players', adminAuth, asyncHandler(async (req: Request,
   const userIds = players.map(p => p.userId);
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
-    select: { id: true, username: true, avatarUrl: true, league: true, rating: true, xp: true, email: true },
+    select: { id: true, username: true, avatarUrl: true, league: true, rating: true, xp: true, email: true, email_display: true },
   });
   const userMap = new Map(users.map(u => [u.id, u]));
   const onlineSet = new Set(contestEngine.getOnlinePlayers(id));
@@ -2770,7 +2796,7 @@ router.get('/contests/:id/players', adminAuth, asyncHandler(async (req: Request,
     return {
       userId: p.userId,
       username: u?.username ?? 'Unknown',
-      email: u?.email ?? '',
+      email: u?.email_display ?? '',
       avatarUrl: u?.avatarUrl ?? null,
       league: u?.league ?? 'bronze',
       rating: u?.rating ?? 1000,

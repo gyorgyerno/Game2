@@ -7,6 +7,7 @@ import { Paginator } from '@/components/admin/Paginator';
 interface User {
   id: string;
   email: string;
+  email_display: string | null;
   username: string;
   rating: number;
   xp: number;
@@ -32,6 +33,7 @@ interface BotProfile {
     id: string;
     username: string;
     email: string;
+    email_display: string | null;
     rating: number;
     xp: number;
     league: string;
@@ -223,7 +225,7 @@ function RealUsersTab() {
                     }}>IP: {u.lastIp}</span>
                   )}
                 </td>
-                <td style={{ padding: '12px 16px', color: '#94a3b8' }}>{u.email}</td>
+                <td style={{ padding: '12px 16px', color: '#94a3b8' }}>{u.email_display ?? u.email}</td>
                 <td style={{ padding: '12px 16px', color: '#a78bfa', fontWeight: 600 }}>{u.rating}</td>
                 <td style={{ padding: '12px 16px' }}>
                   <span style={{ color: LEAGUES[u.league] || '#e2e8f0', textTransform: 'capitalize', fontWeight: 500 }}>

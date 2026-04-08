@@ -37,6 +37,7 @@ services:
       PORT: 4000
       CLIENT_URL: http://localhost:3000
       NODE_ENV: production
+      EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY}
     ports:
       - "4000:4000"
 

@@ -12,9 +12,12 @@ datasource db {
 
 // ─── User ─────────────────────────────────────────────────────────────────────
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  username     String   @unique
+  id              String   @id @default(uuid())
+  email           String   @unique
+  email_encrypted String?            // AES-256-GCM — populated by migration script
+  email_hash      String?  @unique   // SHA-256(lower+trim) — fast exact lookup
+  email_display   String?            // "m***@gmail.com" — safe for admin display
+  username        String   @unique
   avatarUrl    String?
   userType     String   @default("REAL") // REAL|SIMULATED|GHOST
   rating       Int      @default(1000)
@@ -47,9 +50,10 @@ model User {
 
 // ─── OTP ──────────────────────────────────────────────────────────────────────
 model OTP {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  code      String
+  id         String   @id @default(uuid())
+  email      String   @unique
+  email_hash String?  @unique  // SHA-256 — new lookup key; email kept during transition
+  code       String
   expiresAt DateTime
   createdAt DateTime @default(now())
 
