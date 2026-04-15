@@ -33,10 +33,12 @@ export default function Navbar() {
   useEffect(() => {
     if (!user) return;
     getSocket(); // conectează dacă nu e deja conectat
-    return () => { disconnectSocket(); };
+    // Nu deconectăm la unmount (navigare) — socket-ul e singleton persistent
+    // Deconectarea se face explicit la logout
   }, [user]);
 
   function handleLogout() {
+    disconnectSocket(); // deconectează socket-ul la logout explicit
     logout();
     router.push('/');
   }

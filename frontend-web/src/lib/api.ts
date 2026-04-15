@@ -177,3 +177,39 @@ export const contestsApi = {
   leaderboard:  (slug: string, limit?: number) => api.get(`/contests/${slug}/leaderboard`, { params: { limit } }),
   players:      (slug: string) => api.get(`/contests/${slug}/players`),
 };
+
+// ─── Premium Private Rooms ────────────────────────────────────────────────────
+export type PremiumRoundConfig = {
+  gameType: string;   // orice joc din platformă
+  level: number;
+  difficulty: 'easy' | 'medium' | 'hard';
+  timeLimit: number;
+};
+
+export const premiumRoomsApi = {
+  create: (data: {
+    name?: string;
+    mode: 'quick' | 'tournament';
+    maxPlayers?: number;
+    allowSpectators?: boolean;
+    startAt?: string;
+    rounds: PremiumRoundConfig[];
+  }) => api.post('/premium-rooms', data),
+  getMyRooms:  ()                       => api.get('/premium-rooms/my'),
+  get:         (idOrCode: string)       => api.get(`/premium-rooms/${idOrCode}`),
+  join:        (code: string)           => api.post('/premium-rooms/join', { code }),
+  leave:       (id: string)             => api.delete(`/premium-rooms/${id}/leave`),
+  updateSettings: (id: string, data: Partial<{
+    name: string | null;
+    mode: 'quick' | 'tournament';
+    maxPlayers: number;
+    allowSpectators: boolean;
+    startAt: string | null;
+    rounds: PremiumRoundConfig[];
+  }>) => api.patch(`/premium-rooms/${id}/settings`, data),
+  start:       (id: string)             => api.post(`/premium-rooms/${id}/start`, {}),
+  submitScore: (id: string, data: { roundId: string; score: number; timeTaken?: number }) =>
+    api.post(`/premium-rooms/${id}/score`, data),
+  rematch:     (id: string)             => api.post(`/premium-rooms/${id}/rematch`, {}),
+  inviteFriend: (id: string, friendId: string) => api.post(`/premium-rooms/${id}/invite/${friendId}`, {}),
+};

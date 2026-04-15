@@ -2850,4 +2850,108 @@ router.get('/contests/:id/stats', adminAuth, asyncHandler(async (req: Request, r
   res.json(stats);
 }));
 
+// ─── Premium Rooms Admin ───────────────────────────────────────────────────────
+
+/** GET /api/admin/premium-rooms/config — citește sau inițializează configul singleton */
+router.get('/premium-rooms/config', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  let cfg = await prisma.premiumConfig.findUnique({ where: { id: 1 } });
+  if (!cfg) {
+    cfg = await prisma.premiumConfig.create({ data: { id: 1 } });
+  }
+  res.json(cfg);
+}));
+
+/** PATCH /api/admin/premium-rooms/config — actualizează setările */
+router.patch('/premium-rooms/config', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const {
+    enabled, maxPlayersPerRoom, maxRoomsPerDayUser,
+    maxRoundsPerRoom, defaultTimeLimit, maxSpectators, allowGuestJoin,
+  } = req.body as Record<string, unknown>;
+
+  const data: Record<string, unknown> = {};
+  if (typeof enabled === 'boolean') data.enabled = enabled;
+  if (typeof maxPlayersPerRoom === 'number') data.maxPlayersPerRoom = Math.min(Math.max(2, maxPlayersPerRoom), 50);
+  if (typeof maxRoomsPerDayUser === 'number') data.maxRoomsPerDayUser = Math.min(Math.max(1, maxRoomsPerDayUser), 100);
+  if (typeof maxRoundsPerRoom === 'number') data.maxRoundsPerRoom = Math.min(Math.max(1, maxRoundsPerRoom), 50);
+  if (typeof defaultTimeLimit === 'number') data.defaultTimeLimit = Math.min(Math.max(10, defaultTimeLimit), 600);
+  if (typeof maxSpectators === 'number') data.maxSpectators = Math.min(Math.max(0, maxSpectators), 100);
+  if (typeof allowGuestJoin === 'boolean') data.allowGuestJoin = allowGuestJoin;
+
+  const cfg = await prisma.premiumConfig.upsert({
+    where: { id: 1 },
+    update: data,
+    create: { id: 1, ...data },
+  });
+  res.json(cfg);
+}));
+
+/** GET /api/admin/premium-rooms/overview — statistici live */
+router.get('/premium-rooms/overview', adminAuth, asyncHandler(async (_req: AdminRequest, res: Response) => {
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const [totalRooms, activeRooms, todayRooms, totalPremiumUsers, recentRooms] = await Promise.all([
+    prisma.premiumRoom.count(),
+    prisma.premiumRoom.count({ where: { status: { in: ['lobby', 'active'] } } }),
+    prisma.premiumRoom.count({ where: { createdAt: { gte: startOfDay } } }),
+    prisma.user.count({ where: { plan: 'premium' } }),
+    prisma.premiumRoom.findMany({
+      take: 10,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        owner: { select: { username: true } },
+        _count: { select: { players: true } },
+      },
+    }),
+  ]);
+
+  // Top creatori săptăâmâna asta
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const topCreators = await prisma.premiumRoom.groupBy({
+    by: ['ownerId'],
+    where: { createdAt: { gte: weekAgo } },
+    _count: { id: true },
+    orderBy: { _count: { id: 'desc' } },
+    take: 5,
+  });
+  const topCreatorIds = topCreators.map(t => t.ownerId);
+  const topCreatorUsers = await prisma.user.findMany({
+    where: { id: { in: topCreatorIds } },
+    select: { id: true, username: true },
+  });
+  const topCreatorsWithNames = topCreators.map(t => ({
+    username: topCreatorUsers.find(u => u.id === t.ownerId)?.username ?? '?',
+    rooms: t._count.id,
+  }));
+
+  res.json({
+    totalRooms,
+    activeRooms,
+    todayRooms,
+    totalPremiumUsers,
+    recentRooms: recentRooms.map(r => ({
+      id: r.id,
+      code: r.code,
+      ownerUsername: r.owner.username,
+      status: r.status,
+      mode: r.mode,
+      playerCount: r._count.players,
+      createdAt: r.createdAt,
+    })),
+    topCreatorsThisWeek: topCreatorsWithNames,
+  });
+}));
+
+/** PATCH /api/admin/users/:id/plan — setează planul unui user (free | premium) */
+router.patch('/users/:id/plan', adminAuth, asyncHandler(async (req: AdminRequest, res: Response) => {
+  const { id } = req.params;
+  const { plan } = req.body as { plan: string };
+  if (!['free', 'premium'].includes(plan)) {
+    res.status(400).json({ error: 'plan trebuie să fie "free" sau "premium"' });
+    return;
+  }
+  const user = await prisma.user.update({ where: { id }, data: { plan } });
+  res.json({ id: user.id, username: user.username, plan: user.plan });
+}));
+
 export default router;

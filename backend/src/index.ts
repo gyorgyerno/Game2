@@ -22,6 +22,7 @@ import aiRoutes from './routes/ai';
 import friendRoutes from './routes/friends';
 import gamesRoutes from './routes/games';
 import contestsRoutes from './routes/contests';
+import premiumRoomsRoutes from './routes/premiumRooms';
 import prisma from './prisma';
 import { activityFeedGenerator } from './services/simulatedPlayers/ActivityFeedGenerator';
 import { botChatGenerator } from './services/simulatedPlayers/BotChatGenerator';
@@ -64,6 +65,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/friends', friendRoutes);
 app.use('/api/games', gamesRoutes);
 app.use('/api/contests', contestsRoutes);
+app.use('/api/premium-rooms', premiumRoomsRoutes);
 
 app.get('/health', (_req: import('express').Request, res: import('express').Response) =>
   res.json({ status: 'ok', ts: new Date() })

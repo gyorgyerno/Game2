@@ -13,6 +13,14 @@ interface InvitePayload {
   fromAvatarUrl?: string;
 }
 
+interface PremiumInvitePayload {
+  roomId: string;
+  code: string;
+  inviterUsername: string;
+  mode: string;
+  roomName?: string;
+}
+
 const GAME_LABELS: Record<string, string> = {
   integrame: 'Integramă',
   labirinturi: 'Labirint',
@@ -27,6 +35,10 @@ export default function GlobalInviteToast() {
   const [visible, setVisible] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [premiumInvite, setPremiumInvite] = useState<PremiumInvitePayload | null>(null);
+  const [premiumVisible, setPremiumVisible] = useState(false);
+  const premiumTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     // Așteptăm hydration Zustand — până atunci token e null indiferent
     if (!_hasHydrated || !token) return;
@@ -40,15 +52,20 @@ export default function GlobalInviteToast() {
       timerRef.current = setTimeout(() => setVisible(false), 15000);
     };
 
+    const handlePremiumInvite = (payload: PremiumInvitePayload) => {
+      setPremiumInvite(payload);
+      setPremiumVisible(true);
+      if (premiumTimerRef.current) clearTimeout(premiumTimerRef.current);
+      premiumTimerRef.current = setTimeout(() => setPremiumVisible(false), 20000);
+    };
+
     socket.on('friend_invite_received', handleInvite);
+    socket.on('premium_room:invite', handlePremiumInvite);
     return () => {
       socket.off('friend_invite_received', handleInvite);
+      socket.off('premium_room:invite', handlePremiumInvite);
     };
   }, [_hasHydrated, token]);
-
-  if (!visible || !invite) return null;
-
-  const gameLabel = GAME_LABELS[invite.gameType] ?? invite.gameType;
 
   function handleAccept() {
     if (!invite) return;
@@ -60,57 +77,103 @@ export default function GlobalInviteToast() {
     setVisible(false);
   }
 
-  return (
-    <div
-      style={{
-        position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
-        background: '#1e293b', border: '1px solid #334155',
-        borderRadius: 16, padding: '16px 20px', minWidth: 300, maxWidth: 360,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-        display: 'flex', flexDirection: 'column', gap: 12,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{
-          width: 38, height: 38, borderRadius: '50%', background: '#334155',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 700, fontSize: 16, color: '#e2e8f0', flexShrink: 0,
-        }}>
-          {invite.fromUsername[0]?.toUpperCase()}
-        </div>
-        <div>
-          <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#f1f5f9' }}>
-            🎮 Invitație la meci!
-          </p>
-          <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
-            <strong style={{ color: '#e2e8f0' }}>{invite.fromUsername}</strong>{' '}
-            te invită la {gameLabel} · Nivel {invite.level}
-          </p>
-        </div>
-      </div>
+  function handlePremiumAccept() {
+    if (!premiumInvite) return;
+    setPremiumVisible(false);
+    router.push(`/premium-room/join?code=${premiumInvite.code}`);
+  }
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={handleAccept}
+  const gameLabel = invite ? (GAME_LABELS[invite.gameType] ?? invite.gameType) : '';
+
+  return (
+    <>
+      {/* ── Toast invitație joc normal ── */}
+      {visible && invite && (
+        <div
           style={{
-            flex: 1, padding: '8px 0', borderRadius: 8, border: 'none',
-            background: '#10b981', color: '#fff', fontWeight: 700,
-            fontSize: 13, cursor: 'pointer',
+            position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+            background: '#1e293b', border: '1px solid #334155',
+            borderRadius: 16, padding: '16px 20px', minWidth: 300, maxWidth: 360,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            display: 'flex', flexDirection: 'column', gap: 12,
           }}
         >
-          ✅ Acceptă
-        </button>
-        <button
-          onClick={handleDecline}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: '50%', background: '#334155',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, fontSize: 16, color: '#e2e8f0', flexShrink: 0,
+            }}>
+              {invite.fromUsername[0]?.toUpperCase()}
+            </div>
+            <div>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#f1f5f9' }}>
+                🎮 Invitație la meci!
+              </p>
+              <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
+                <strong style={{ color: '#e2e8f0' }}>{invite.fromUsername}</strong>{' '}
+                te invită la {gameLabel} · Nivel {invite.level}
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleAccept}
+              style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', background: '#10b981', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              ✅ Acceptă
+            </button>
+            <button onClick={handleDecline}
+              style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: '1px solid #475569', background: 'transparent', color: '#94a3b8', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+              Refuză
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Toast invitație cameră premium ── */}
+      {premiumVisible && premiumInvite && (
+        <div
           style={{
-            flex: 1, padding: '8px 0', borderRadius: 8,
-            border: '1px solid #475569', background: 'transparent',
-            color: '#94a3b8', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            position: 'fixed', bottom: visible && invite ? 140 : 24, right: 24, zIndex: 9999,
+            background: '#0f172a', border: '1px solid rgba(251,191,36,0.4)',
+            borderRadius: 16, padding: '16px 20px', minWidth: 300, maxWidth: 360,
+            boxShadow: '0 8px 32px rgba(251,191,36,0.15)',
+            display: 'flex', flexDirection: 'column', gap: 12,
           }}
         >
-          Refuză
-        </button>
-      </div>
-    </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #f59e0b, #ca8a04)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 18, flexShrink: 0,
+            }}>
+              💎
+            </div>
+            <div>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#fef3c7' }}>
+                Invitație cameră privată
+              </p>
+              <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
+                <strong style={{ color: '#fde68a' }}>{premiumInvite.inviterUsername}</strong>{' '}
+                te invită în {premiumInvite.roomName ? <strong style={{ color: '#fde68a' }}>{premiumInvite.roomName.toUpperCase()}</strong> : 'camera sa privată'}
+              </p>
+              <p style={{ margin: 0, fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                {premiumInvite.mode === 'tournament' ? '🏆 Turneu' : '⚡ Quick Match'} · Cod: <span style={{ fontFamily: 'monospace', color: '#fbbf24' }}>{premiumInvite.code}</span>
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handlePremiumAccept}
+              style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', background: 'linear-gradient(90deg, #f59e0b, #eab308)', color: '#1c1917', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              💎 Intră în cameră
+            </button>
+            <button onClick={() => setPremiumVisible(false)}
+              style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: '1px solid rgba(251,191,36,0.2)', background: 'transparent', color: '#94a3b8', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+              Refuză
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

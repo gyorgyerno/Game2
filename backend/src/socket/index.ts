@@ -139,9 +139,34 @@ export function initSocket(server: HttpServer) {
       } catch { /* non-critical */ }
     });
 
+    // ── Premium Room Socket Rooms ─────────────────────────────────────────
+    socket.on('premium_room:join', ({ roomId }: { roomId: string }) => {
+      if (!roomId || typeof roomId !== 'string') return;
+      socket.join(`premium_room:${roomId}`);
+      // Marcăm userul online în cameră
+      prisma.premiumRoomPlayer.updateMany({
+        where: { roomId, userId },
+        data: { isOnline: true },
+      }).catch(() => {});
+    });
+
+    socket.on('premium_room:leave', ({ roomId }: { roomId: string }) => {
+      if (!roomId || typeof roomId !== 'string') return;
+      socket.leave(`premium_room:${roomId}`);
+      prisma.premiumRoomPlayer.updateMany({
+        where: { roomId, userId },
+        data: { isOnline: false },
+      }).catch(() => {});
+    });
+
     socket.on('disconnect', () => {
       console.log(`🔌 Socket disconnected: ${socket.id}`);
       contestEngine.markOfflineFromAll(userId);
+      // Marcăm offline în toate camerele premium
+      prisma.premiumRoomPlayer.updateMany({
+        where: { userId, room: { status: { not: 'finished' } } },
+        data: { isOnline: false },
+      }).catch(() => {});
       // Untrack online — notify friends only when fully offline (all tabs closed)
       const remaining = (onlineUsers.get(userId) ?? 1) - 1;
       if (remaining <= 0) {

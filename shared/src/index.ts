@@ -7,6 +7,7 @@ export interface User {
   rating: number;
   xp: number;
   league: League;
+  plan?: string;
   createdAt: string;
 }
 
@@ -358,3 +359,62 @@ export interface ContestRoomLeave { contestId: string; }
 export interface ContestStatusChange { contestId: string; status: ContestStatus; }
 export interface ContestLeaderboardUpdate { contestId: string; leaderboard: ContestLeaderboardEntry[]; }
 export interface ContestPlayersUpdate { contestId: string; onlinePlayers: string[]; }
+
+// ─── Premium Private Rooms ────────────────────────────────────────────────────
+export type PremiumRoomStatus = 'lobby' | 'active' | 'finished';
+export type PremiumRoomMode = 'quick' | 'tournament';
+export type PremiumDifficulty = 'easy' | 'medium' | 'hard';
+
+export interface PremiumRoomRound {
+  id: string;
+  order: number;
+  gameType: string;  // orice joc din platformă — game-agnostic
+  level: number;
+  difficulty: PremiumDifficulty;
+  timeLimit: number;
+  isActive: boolean;
+  isFinished: boolean;
+}
+
+export interface PremiumRoomScore {
+  userId: string;
+  username: string;
+  score: number;
+  timeTaken?: number;
+  position?: number;
+}
+
+export interface PremiumRoomPlayerPublic {
+  userId: string;
+  username: string;
+  avatarUrl?: string;
+  isOwner: boolean;
+  isOnline: boolean;
+}
+
+export interface PremiumRoomPublic {
+  id: string;
+  code: string;
+  ownerId: string;
+  name?: string;
+  status: PremiumRoomStatus;
+  mode: PremiumRoomMode;
+  maxPlayers: number;
+  allowSpectators: boolean;
+  startAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  players: PremiumRoomPlayerPublic[];
+  rounds: PremiumRoomRound[];
+  roundScores: Record<string, PremiumRoomScore[]>; // roundId → scores
+}
+
+// Socket events Premium Room (prefixate cu "premium_room:")
+export interface PremiumRoomSocketJoin { roomId: string; }
+export interface PremiumRoomSocketLeave { roomId: string; }
+export interface PremiumRoomUpdate { room: PremiumRoomPublic; }
+export interface PremiumRoomRoundStart { roomId: string; round: PremiumRoomRound; }
+export interface PremiumRoomRoundFinish { roomId: string; roundId: string; scores: PremiumRoomScore[]; }
+export interface PremiumRoomFinish { roomId: string; finalScores: PremiumRoomScore[]; }
+export interface PremiumRoomRematch { roomId: string; newRoomId: string; newCode: string; }

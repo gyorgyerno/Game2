@@ -10,6 +10,7 @@ import Navbar from '@/components/Navbar';
 import { hydrateIntegrameProgressFromServer, isCompleted, isUnlocked } from '@/store/gameProgress';
 import { useGamesCatalog } from '@/games/useGamesCatalog';
 import { hydrateMazeProgressFromServer } from '@/store/mazeSoloProgress';
+import PremiumRoomCard from '@/components/premium/PremiumRoomCard';
 
 const INVITE_TTL_SECONDS = 300;
 const RANDOM_ACCEPT_TTL_SECONDS = 10;
@@ -546,6 +547,13 @@ export default function DashboardPage() {
               );
             })}
           </div>
+          </div>
+        )}
+
+        {/* Premium Private Room card */}
+        {!showGameDetails && (
+          <div className="flex flex-col items-center">
+            <PremiumRoomCard isPremium={user?.plan === 'premium'} userId={user?.id} />
           </div>
         )}
 

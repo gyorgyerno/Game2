@@ -24,6 +24,7 @@ model User {
   xp           Int      @default(0)
   league       String   @default("bronze")
   referralCode String?
+  plan         String   @default("free")  // free | premium
   isBanned     Boolean  @default(false)
   lastIp       String?
   platform     String?  // web|ios|android
@@ -31,6 +32,7 @@ model User {
   updatedAt    DateTime @updatedAt
 
   matchPlayers MatchPlayer[]
+  premiumRooms PremiumRoom[] @relation("PremiumRoomOwner")
   gameStats    UserGameStats[]
   gameRatings  UserGameRating[]
   soloGameProgress UserSoloGameProgress[]
@@ -555,4 +557,107 @@ model ContestScore {
   @@index([contestId, userId])
   @@index([contestId, roundId])
   @@map("contest_scores")
+}
+
+// ─── PremiumRoom ──────────────────────────────────────────────────────────────
+// Cameră privată temporară creată de utilizatori premium.
+// gameType este un String liber — funcționează cu orice joc existent sau adăugat ulterior.
+// settings stochează configurația ca JSON: { mode, maxPlayers, allowSpectators, timeLimit, difficulty }
+// status: lobby (așteptare) → active (joc în curs) → finished (finalizat)
+model PremiumRoom {
+  id             String   @id @default(cuid())
+  code           String   @unique  // 6-char alphanumeric invite code
+  ownerId        String
+  name           String?  // optional display name set by owner
+  status         String   @default("lobby") // lobby | active | finished
+  mode           String   @default("quick") // quick | tournament
+  maxPlayers     Int      @default(8)
+  allowSpectators Boolean @default(false)
+  startAt        DateTime?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  owner          User              @relation("PremiumRoomOwner", fields: [ownerId], references: [id])
+  players        PremiumRoomPlayer[]
+  rounds         PremiumRoomRound[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@map("premium_rooms")
+}
+
+// ─── PremiumRoomRound ─────────────────────────────────────────────────────────
+// O rundă dintr-o cameră premium. gameType este String liber (orice joc).
+// În modul "quick": o singură rundă. În "tournament": mai multe runde ordonate.
+model PremiumRoomRound {
+  id         String  @id @default(cuid())
+  roomId     String
+  order      Int     // 1, 2, 3...
+  gameType   String  // orice gameType din platformă
+  level      Int     @default(1)
+  difficulty String  @default("medium") // easy | medium | hard (hint pt generator)
+  timeLimit  Int     @default(180)      // secunde
+  isActive   Boolean @default(false)
+  isFinished Boolean @default(false)
+
+  room       PremiumRoom          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  scores     PremiumRoomScore[]
+
+  @@unique([roomId, order])
+  @@index([roomId])
+  @@map("premium_room_rounds")
+}
+
+// ─── PremiumRoomPlayer ───────────────────────────────────────────────────────
+// Jucător înscris într-o cameră premium.
+// Orice user poate fi invitat, indiferent de plan.
+model PremiumRoomPlayer {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  isOwner   Boolean  @default(false)
+  isOnline  Boolean  @default(false)
+  joinedAt  DateTime @default(now())
+
+  room      PremiumRoom    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@map("premium_room_players")
+}
+
+// ─── PremiumRoomScore ─────────────────────────────────────────────────────────
+// Scorul unui jucător pentru o rundă dintr-o cameră premium.
+model PremiumRoomScore {
+  id         String   @id @default(cuid())
+  roundId    String
+  userId     String
+  username   String
+  score      Int      @default(0)
+  timeTaken  Int?     // secunde
+  position   Int?
+  createdAt  DateTime @default(now())
+
+  round      PremiumRoomRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, userId])
+  @@index([roundId])
+  @@map("premium_room_scores")
+}
+
+// ─── Premium Config (singleton row, id=1) ────────────────────────────────────
+model PremiumConfig {
+  id                  Int      @id @default(1)
+  enabled             Boolean  @default(true)   // feature flag global
+  maxPlayersPerRoom   Int      @default(8)       // max jucători/cameră
+  maxRoomsPerDayUser  Int      @default(10)      // câte camere poate crea un user/zi
+  maxRoundsPerRoom    Int      @default(20)      // max runde per cameră
+  defaultTimeLimit    Int      @default(60)      // secunde default per rundă
+  maxSpectators       Int      @default(20)      // max spectatori/cameră
+  allowGuestJoin      Boolean  @default(true)    // poate un guest (non-premium) intra cu cod
+  updatedAt           DateTime @updatedAt
+
+  @@map("premium_config")
 }
